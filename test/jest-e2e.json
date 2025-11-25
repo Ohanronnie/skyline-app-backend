@@ -1,0 +1,20 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "useESM": false
+      }
+    ]
+  },
+  "setupFilesAfterEnv": ["<rootDir>/setup.ts"],
+  "testTimeout": 30000,
+  "maxWorkers": 1,
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@paralleldrive/cuid2|supertest|formidable|superagent)/)"
+  ]
+}
