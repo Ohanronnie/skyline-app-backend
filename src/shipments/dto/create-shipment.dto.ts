@@ -16,6 +16,10 @@ export class CreateShipmentDto {
   customerId?: string;
 
   @IsOptional()
+  @IsMongoId()
+  partnerId?: string;
+
+  @IsOptional()
   @IsString()
   description?: string;
 

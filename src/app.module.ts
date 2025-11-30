@@ -21,6 +21,8 @@ import { ReportsModule } from './reports/reports.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MailerModule } from './mailer/mailer.module';
 import { PartnersModule } from './partners/partners.module';
+import { SmsTemplatesModule } from './sms-templates/sms-templates.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { PartnersModule } from './partners/partners.module';
     ReportsModule,
     DashboardModule,
     PartnersModule,
+    SmsTemplatesModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -35,16 +35,29 @@ export class ShipmentsController {
     // Location-based filtering
     const warehouseIds =
       await this.locationFilter.getAccessibleWarehouseIds(user);
-    
-    const partnerId = user.role === 'partner' ? user.userId : undefined;
-    return this.shipmentsService.findAll(organization, warehouseIds, partnerId);
+
+    const partnerId =
+      user.isPartner || user.role === 'partner' ? user.userId : undefined;
+    const customerId =
+      user.isCustomer || user.role === 'customer' ? user.userId : undefined;
+    return this.shipmentsService.findAll(
+      organization,
+      warehouseIds,
+      partnerId,
+      customerId,
+    );
   }
 
   @Post()
   async create(
     @Body() dto: CreateShipmentDto,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
+    // Automatically assign partnerId if user is a partner and not already set
+    if (!dto.partnerId && (user.isPartner || user.role === 'partner')) {
+      dto.partnerId = user.userId;
+    }
     return this.shipmentsService.create(dto, organization);
   }
 
@@ -71,7 +84,15 @@ export class ShipmentsController {
     @CurrentOrganization() organization: Organization,
     @CurrentUser() user: any,
   ) {
-    return this.shipmentsService.update(id, dto, organization, user.role, user.userId);
+    // Determine user role - partners have isPartner flag
+    const userRole = user.isPartner ? 'partner' : user.role;
+    return this.shipmentsService.update(
+      id,
+      dto,
+      organization,
+      userRole,
+      user.userId,
+    );
   }
 
   @Delete(':id')

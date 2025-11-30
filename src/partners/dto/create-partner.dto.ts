@@ -1,4 +1,10 @@
-import { IsString, IsNotEmpty, IsEnum } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsEmail,
+  IsOptional,
+} from 'class-validator';
 import { Organization } from '../../user/users.schema';
 
 export class CreatePartnerDto {
@@ -9,6 +15,10 @@ export class CreatePartnerDto {
   @IsString()
   @IsNotEmpty()
   phoneNumber: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @IsEnum(Organization)
   organization: Organization;

@@ -7,6 +7,7 @@ import {
   ContainerDocument,
   ContainerStatus,
 } from '../containers/containers.schema';
+import { Tracking, TrackingDocument } from './tracking.schema';
 
 @Injectable()
 export class TrackingService {
@@ -15,22 +16,39 @@ export class TrackingService {
     private readonly shipmentModel: Model<ShipmentDocument>,
     @InjectModel(Container.name)
     private readonly containerModel: Model<ContainerDocument>,
+    @InjectModel(Tracking.name)
+    private readonly trackingModel: Model<TrackingDocument>,
   ) {}
 
   async trackNumber(number: string, organization: string) {
+   // console.log(await this.trackingModel.find({}).exec());
+    const trackingEntries = await this.trackingModel
+      .find({ trackingNumber: number })
+      .sort({ createdAt: 1 })
+      .exec();
     // Search for shipment first
     const shipment = await this.shipmentModel
       .findOne({ trackingNumber: number, organization })
       .exec();
-    if (shipment) return { type: 'shipment', data: shipment };
+    if (shipment)
+      return {
+        type: 'shipment',
+        data: shipment,
+        tracking: trackingEntries,
+      };
 
     // Then search for container
     const container = await this.containerModel
       .findOne({ containerNumber: number, organization })
       .exec();
-    if (container) return { type: 'container', data: container };
+    if (container)
+      return {
+        type: 'container',
+        data: container,
+        tracking: trackingEntries,
+      };
 
-    return { type: 'unknown', data: null };
+    return { type: 'unknown', data: null, tracking: trackingEntries };
   }
 
   async activeContainers(organization: string) {

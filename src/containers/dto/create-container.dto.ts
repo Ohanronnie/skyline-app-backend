@@ -1,4 +1,10 @@
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsMongoId,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ContainerStatus } from '../containers.schema';
 
 export class CreateContainerDto {
@@ -32,4 +38,12 @@ export class CreateContainerDto {
   @IsOptional()
   @IsString()
   currentLocation?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  customerId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  partnerId?: string;
 }

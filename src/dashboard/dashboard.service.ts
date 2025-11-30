@@ -12,6 +12,8 @@ import {
   ContainerStatus,
 } from '../containers/containers.schema';
 import { EventLog, EventLogDocument } from '../events/events.schema';
+import { Customer, CustomerDocument } from '../customers/customers.schema';
+import { Warehouse, WarehouseDocument } from '../warehouses/warehouses.schema';
 
 @Injectable()
 export class DashboardService {
@@ -22,17 +24,48 @@ export class DashboardService {
     private readonly containerModel: Model<ContainerDocument>,
     @InjectModel(EventLog.name)
     private readonly eventModel: Model<EventLogDocument>,
+    @InjectModel(Customer.name)
+    private readonly customerModel: Model<CustomerDocument>,
+    @InjectModel(Warehouse.name)
+    private readonly warehouseModel: Model<WarehouseDocument>,
   ) {}
 
   async stats() {
-    const [shipments, containers] = await Promise.all([
+    const [
+      shipments,
+      containers,
+      customers,
+      warehouses,
+      inTransit,
+      recentShipments,
+    ] = await Promise.all([
       this.shipmentModel.countDocuments(),
       this.containerModel.countDocuments(),
+      this.customerModel.countDocuments(),
+      this.warehouseModel.countDocuments(),
+      this.containerModel.countDocuments({
+        status: ContainerStatus.IN_TRANSIT,
+      }),
+      this.shipmentModel
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('trackingNumber status createdAt customerId partnerId')
+        .exec(),
     ]);
-    const inTransit = await this.containerModel.countDocuments({
-      status: ContainerStatus.IN_TRANSIT,
-    });
-    return { shipments, containers, inTransit };
+
+    return {
+      totals: {
+        shipments,
+        containers,
+        customers,
+        warehouses,
+        inTransitContainers: inTransit,
+      },
+      recentActivity: {
+        recentShipments,
+      },
+    };
   }
 
   async activity() {

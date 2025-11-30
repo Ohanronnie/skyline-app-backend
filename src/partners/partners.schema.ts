@@ -13,6 +13,9 @@ export class Partner {
   @Prop({ required: true })
   name: string;
 
+  @Prop({ required: false, lowercase: true, trim: true })
+  email?: string;
+
   @Prop({ required: true, unique: true, index: true })
   phoneNumber: string;
 
@@ -35,6 +38,12 @@ export class Partner {
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
+
+  @Prop({ required: false })
+  businessRegistrationNumber?: string;
+
+  @Prop({ required: false })
+  businessAddress?: string;
 }
 
 export const PartnerSchema = SchemaFactory.createForClass(Partner);

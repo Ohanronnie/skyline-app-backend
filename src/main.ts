@@ -10,7 +10,7 @@ import { existsSync, mkdirSync } from 'fs';
 
 async function bootstrap() {
   dotenv.config();
-  console.log(process.env);
+  //console.log(process.env);
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
@@ -18,7 +18,7 @@ async function bootstrap() {
   const uploadsDir = join(process.cwd(), 'uploads', 'documents');
   if (!existsSync(uploadsDir)) {
     mkdirSync(uploadsDir, { recursive: true });
-    console.log('📁 Created uploads directory:', uploadsDir);
+   // console.log('📁 Created uploads directory:', uploadsDir);
   }
 
   // Serve static files from uploads directory
@@ -38,7 +38,7 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim());
 
-  console.log('🌐 CORS Allowed Origins:', allowedOrigins);
+ // console.log('🌐 CORS Allowed Origins:', allowedOrigins);
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -75,7 +75,7 @@ async function bootstrap() {
   );
 
   const port = configService.get<number>('PORT', 3000);
-  console.log(process.env);
+ // console.log(process.env);
   await app.listen(port);
   console.log(`🚀 Application is running on: http://localhost:${port}/api`);
 }

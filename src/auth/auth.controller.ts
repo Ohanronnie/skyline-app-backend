@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { CustomersService } from '../customers/customers.service';
+import { PartnersService } from '../partners/partners.service';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -17,7 +19,11 @@ import { JwtRefreshAuthGuard } from './guards/jwt-refresh.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly customersService: CustomersService,
+    private readonly partnersService: PartnersService,
+  ) {}
 
   @Throttle({ auth: { limit: 5, ttl: 60000 } })
   @Post('login')
@@ -29,12 +35,29 @@ export class AuthController {
   @UseGuards(JwtRefreshAuthGuard)
   @Post('refresh')
   async refresh(@Req() req: any) {
-    const { user, refreshToken } = req;
+    const {
+      userId,
+      role,
+      organization,
+      warehouseId,
+      isCustomer,
+      isPartner,
+      refreshToken,
+    } = req.user;
+
+    if (isPartner) {
+      return this.partnersService.refresh(userId, refreshToken);
+    }
+
+    if (isCustomer) {
+      return this.customersService.refresh(userId, refreshToken);
+    }
+
     return this.authService.refresh(
-      user.userId,
-      user.role,
-      user.organization,
-      user.warehouseId,
+      userId,
+      role,
+      organization,
+      warehouseId,
       refreshToken,
     );
   }

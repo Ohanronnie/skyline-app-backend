@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { UserModule } from '../user/users.module';
 import { CustomersModule } from '../customers/customers.module';
+import { PartnersModule } from '../partners/partners.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { LocationFilterService } from './location-filter.service';
 import { WarehousesModule } from '../warehouses/warehouses.module';
@@ -24,6 +25,7 @@ import { WarehousesModule } from '../warehouses/warehouses.module';
     }),
     UserModule,
     CustomersModule,
+    PartnersModule,
     MailerModule,
     WarehousesModule,
   ],

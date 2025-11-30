@@ -12,11 +12,13 @@ import { ContainersService } from './containers.service';
 import { CreateContainerDto } from './dto/create-container.dto';
 import { UpdateContainerDto } from './dto/update-container.dto';
 import { LoadShipmentsDto } from './dto/load-shipments.dto';
+import { AssignCustomerDto } from './dto/assign-customer.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole, Organization } from '../user/users.schema';
 import { CurrentOrganization } from '../auth/organization.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('containers')
@@ -24,8 +26,13 @@ export class ContainersController {
   constructor(private readonly containersService: ContainersService) {}
 
   @Get()
-  async findAll(@CurrentOrganization() organization: Organization) {
-    return this.containersService.findAll(organization);
+  async findAll(
+    @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
+  ) {
+    const partnerId =
+      user.isPartner || user.role === 'partner' ? user.userId : undefined;
+    return this.containersService.findAll(organization, partnerId);
   }
 
   @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
@@ -33,7 +40,12 @@ export class ContainersController {
   async create(
     @Body() dto: CreateContainerDto,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
+    // Automatically assign partnerId if user is a partner and not already set
+    if (!dto.partnerId && (user.isPartner || user.role === 'partner')) {
+      dto.partnerId = user.userId;
+    }
     return this.containersService.create(dto, organization);
   }
 
@@ -45,14 +57,22 @@ export class ContainersController {
     return this.containersService.findOne(id, organization);
   }
 
-  @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
   @Put(':id')
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateContainerDto,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
-    return this.containersService.update(id, dto, organization);
+    // Determine user role - partners have isPartner flag
+    const userRole = user.isPartner ? 'partner' : user.role;
+    return this.containersService.update(
+      id,
+      dto,
+      organization,
+      userRole,
+      user.userId,
+    );
   }
 
   @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
@@ -71,6 +91,24 @@ export class ContainersController {
     @CurrentOrganization() organization: Organization,
   ) {
     return this.containersService.listShipments(id, organization);
+  }
+
+  @Put(':id/assign-customer')
+  async assignCustomer(
+    @Param('id') id: string,
+    @Body() dto: AssignCustomerDto,
+    @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
+  ) {
+    // Determine user role - partners have isPartner flag
+    const userRole = user.isPartner ? 'partner' : user.role;
+    return this.containersService.assignCustomer(
+      id,
+      dto.customerId || null,
+      organization,
+      userRole,
+      user.userId,
+    );
   }
 
   @Roles(UserRole.ADMIN)

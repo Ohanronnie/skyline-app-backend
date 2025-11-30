@@ -5,6 +5,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Shipment, ShipmentSchema } from '../shipments/shipments.schema';
 import { Container, ContainerSchema } from '../containers/containers.schema';
 import { EventLog, EventLogSchema } from '../events/events.schema';
+import { Customer, CustomerSchema } from '../customers/customers.schema';
+import { Warehouse, WarehouseSchema } from '../warehouses/warehouses.schema';
 
 @Module({
   imports: [
@@ -12,6 +14,8 @@ import { EventLog, EventLogSchema } from '../events/events.schema';
       { name: Shipment.name, schema: ShipmentSchema },
       { name: Container.name, schema: ContainerSchema },
       { name: EventLog.name, schema: EventLogSchema },
+      { name: Customer.name, schema: CustomerSchema },
+      { name: Warehouse.name, schema: WarehouseSchema },
     ]),
   ],
   controllers: [DashboardController],
