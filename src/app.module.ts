@@ -23,6 +23,7 @@ import { MailerModule } from './mailer/mailer.module';
 import { PartnersModule } from './partners/partners.module';
 import { SmsTemplatesModule } from './sms-templates/sms-templates.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     PartnersModule,
     SmsTemplatesModule,
     NotificationsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [
