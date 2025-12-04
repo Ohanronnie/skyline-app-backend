@@ -24,6 +24,7 @@ import { PartnersModule } from './partners/partners.module';
 import { SmsTemplatesModule } from './sms-templates/sms-templates.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
+import { CargoModule } from './cargo/cargo.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { PaymentsModule } from './payments/payments.module';
     SmsTemplatesModule,
     NotificationsModule,
     PaymentsModule,
+    CargoModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Patch,
@@ -8,13 +9,18 @@ import {
   UseGuards,
   Request,
   ParseIntPipe,
+  Post,
 } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NotificationRecipientType } from './notifications.schema';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../user/users.schema';
+import { BroadcastDto } from './dto/broadcast.dto';
 
 @Controller('notifications')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
@@ -82,5 +88,11 @@ export class NotificationsController {
       req.user.organization,
       recipientId,
     );
+  }
+
+  @Post('broadcast')
+  @Roles(UserRole.ADMIN)
+  async broadcast(@Request() req, @Body() dto: BroadcastDto) {
+    return this.notificationsService.broadcast(dto, req.user.organization);
   }
 }

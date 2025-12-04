@@ -1,15 +1,35 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Notification, NotificationDocument, NotificationRecipientType } from './notifications.schema';
+import {
+  Notification,
+  NotificationDocument,
+  NotificationRecipientType,
+  NotificationType,
+} from './notifications.schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { Organization } from '../user/users.schema';
+import { InjectModel as InjectMongooseModel } from '@nestjs/mongoose';
+import { Customer, CustomerDocument } from '../customers/customers.schema';
+import { Partner, PartnerDocument } from '../partners/partners.schema';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SmsSendEvent } from '../events/sms.events';
+import { BroadcastDto, BroadcastTarget } from './dto/broadcast.dto';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private notificationModel: Model<NotificationDocument>,
+    @InjectMongooseModel(Customer.name)
+    private readonly customerModel: Model<CustomerDocument>,
+    @InjectMongooseModel(Partner.name)
+    private readonly partnerModel: Model<PartnerDocument>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -98,5 +118,138 @@ export class NotificationsService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Notification not found');
     }
+  }
+
+  /**
+   * Broadcast a message as notifications and/or SMS to customers/partners.
+   */
+  async broadcast(
+    dto: BroadcastDto,
+    organization: Organization,
+  ): Promise<{ count: number }> {
+    const {
+      target,
+      title,
+      message,
+      type,
+      sendSms = true,
+      sendNotification = true,
+      recipientId,
+    } = dto;
+
+    if (!sendSms && !sendNotification) {
+      throw new BadRequestException(
+        'At least one of sendSms or sendNotification must be true',
+      );
+    }
+
+    // Resolve recipients
+    let customers: CustomerDocument[] = [];
+    let partners: PartnerDocument[] = [];
+
+    if (
+      target === BroadcastTarget.ALL ||
+      target === BroadcastTarget.CUSTOMERS
+    ) {
+      customers = await this.customerModel.find({ organization }).exec();
+    }
+
+    if (target === BroadcastTarget.ALL || target === BroadcastTarget.PARTNERS) {
+      partners = await this.partnerModel
+        .find({ organization, isActive: true })
+        .exec();
+    }
+
+    if (
+      target === BroadcastTarget.CUSTOMER ||
+      target === BroadcastTarget.PARTNER
+    ) {
+      if (!recipientId) {
+        throw new BadRequestException(
+          'recipientId is required when target is customer or partner',
+        );
+      }
+      if (target === BroadcastTarget.CUSTOMER) {
+        const customer = await this.customerModel
+          .findOne({ _id: recipientId, organization })
+          .exec();
+        if (!customer) {
+          throw new NotFoundException('Customer not found');
+        }
+        customers = [customer];
+      } else {
+        const partner = await this.partnerModel
+          .findOne({ _id: recipientId, organization, isActive: true })
+          .exec();
+        if (!partner) {
+          throw new NotFoundException('Partner not found');
+        }
+        partners = [partner];
+      }
+    }
+
+    let count = 0;
+    const notificationType = type ?? NotificationType.INFO;
+
+    // Create notifications + SMS for customers
+    for (const customer of customers) {
+      if (sendNotification) {
+        await this.create(
+          {
+            recipientId: customer._id.toString(),
+            recipientType: NotificationRecipientType.CUSTOMER,
+            title,
+            message,
+            type: notificationType,
+          },
+          organization,
+        );
+        count++;
+      }
+      if (sendSms && customer.phone) {
+        this.eventEmitter.emit(
+          'sms.send',
+          new SmsSendEvent(
+            customer.phone,
+            message,
+            undefined,
+            undefined,
+            organization,
+          ),
+        );
+      }
+    }
+
+    // Create notifications + SMS for partners
+    for (const partner of partners) {
+      if (sendNotification) {
+        await this.create(
+          {
+            recipientId: partner._id.toString(),
+            recipientType: NotificationRecipientType.PARTNER,
+            title,
+            message,
+            type: notificationType,
+          },
+          organization,
+        );
+        count++;
+      }
+      if (sendSms && partner.phoneNumber) {
+        this.eventEmitter.emit(
+          'sms.send',
+          new SmsSendEvent(
+            partner.phoneNumber,
+            message,
+            undefined,
+            undefined,
+            organization,
+            partner._id.toString(),
+          ),
+        );
+      }
+    }
+
+    return { count };
   }
 }
