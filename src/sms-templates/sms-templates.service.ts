@@ -10,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import { SmsTemplate, SmsTemplateDocument } from './sms-templates.schema';
 import { Organization } from '../user/users.schema';
 import { CreateSmsTemplateDto } from './dto/create-sms-template.dto';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 import { UpdateSmsTemplateDto } from './dto/update-sms-template.dto';
 import { ShipmentStatus } from '../shipments/shipments.schema';
 
@@ -77,7 +78,7 @@ export class SmsTemplatesService implements OnModuleInit {
     const existing = await this.smsTemplateModel
       .findOne({
         name: dto.name,
-        organization,
+        ...buildOrganizationFilter(organization),
         ...ownerQuery,
       })
       .exec();
@@ -109,7 +110,7 @@ export class SmsTemplatesService implements OnModuleInit {
     // 1. Get all default templates
     const defaultTemplates = await this.smsTemplateModel
       .find({
-        organization,
+        ...buildOrganizationFilter(organization),
         isDefault: true,
       })
       .exec();
@@ -123,7 +124,7 @@ export class SmsTemplatesService implements OnModuleInit {
     const ownerQuery = this.getOwnerQuery(partnerId, userId);
     const customTemplates = await this.smsTemplateModel
       .find({
-        organization,
+        ...buildOrganizationFilter(organization),
         ...ownerQuery,
       })
       .exec();
@@ -147,7 +148,7 @@ export class SmsTemplatesService implements OnModuleInit {
     userId?: string,
   ): Promise<SmsTemplateDocument> {
     const template = await this.smsTemplateModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (!template) {
@@ -188,7 +189,7 @@ export class SmsTemplatesService implements OnModuleInit {
       const custom = await this.smsTemplateModel
         .findOne({
           name,
-          organization,
+          ...buildOrganizationFilter(organization),
           ...ownerQuery,
           isActive: true,
         })
@@ -201,7 +202,7 @@ export class SmsTemplatesService implements OnModuleInit {
     return this.smsTemplateModel
       .findOne({
         name,
-        organization,
+        ...buildOrganizationFilter(organization),
         isDefault: true,
         isActive: true,
       })
@@ -219,7 +220,7 @@ export class SmsTemplatesService implements OnModuleInit {
       const ownerQuery = this.getOwnerQuery(partnerId, userId);
       const custom = await this.smsTemplateModel
         .findOne({
-          organization,
+          ...buildOrganizationFilter(organization),
           statusMapping: { $in: [status] }, // statusMapping is an array
           ...ownerQuery,
           isActive: true,
@@ -232,7 +233,7 @@ export class SmsTemplatesService implements OnModuleInit {
     // 2. Fallback to default
     return this.smsTemplateModel
       .findOne({
-        organization,
+        ...buildOrganizationFilter(organization),
         statusMapping: { $in: [status] }, // statusMapping is an array
         isDefault: true,
         isActive: true,
@@ -257,7 +258,7 @@ export class SmsTemplatesService implements OnModuleInit {
       const existingCopy = await this.smsTemplateModel
         .findOne({
           name: template.name,
-          organization,
+          ...buildOrganizationFilter(organization),
           ...ownerQuery,
         })
         .exec();

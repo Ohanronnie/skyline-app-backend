@@ -1,5 +1,6 @@
 import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 import { CustomerType, CustomerLocation } from '../customers.schema';
+import { IsGhanaPhone } from '../../common/validators/phone.validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -14,6 +15,7 @@ export class CreateCustomerDto {
 
   @IsOptional()
   @IsString()
+  @IsGhanaPhone()
   phone?: string;
 
   @IsOptional()

@@ -15,6 +15,7 @@ import * as bcrypt from 'bcryptjs';
 import { Partner, PartnerDocument, PartnerRole } from './partners.schema';
 import { Organization } from '../user/users.schema';
 import { SmsSendEvent } from '../events/sms.events';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 import { Shipment, ShipmentDocument } from '../shipments/shipments.schema';
 import { Customer, CustomerDocument } from '../customers/customers.schema';
 import { Container, ContainerDocument } from '../containers/containers.schema';
@@ -56,7 +57,7 @@ export class PartnersService {
         partnerId,
       }),
       this.shipmentModel
-        .find({ partnerId, organization: partner.organization })
+        .find({ partnerId, ...buildOrganizationFilter(partner.organization) })
         .select('containerId')
         .exec(),
     ]);
@@ -73,7 +74,7 @@ export class PartnersService {
       containerIds.length > 0
         ? await this.containerModel.countDocuments({
             _id: { $in: containerIds },
-            organization: partner.organization,
+            ...buildOrganizationFilter(partner.organization),
           })
         : 0;
 
@@ -92,7 +93,7 @@ export class PartnersService {
     email?: string,
   ): Promise<PartnerDocument> {
     const existing = await this.partnerModel
-      .findOne({ phoneNumber, organization })
+      .findOne({ phoneNumber, ...buildOrganizationFilter(organization) })
       .exec();
     if (existing) {
       throw new ConflictException(
@@ -114,11 +115,15 @@ export class PartnersService {
     phoneNumber: string,
     organization: Organization,
   ): Promise<PartnerDocument | null> {
-    return this.partnerModel.findOne({ phoneNumber, organization }).exec();
+    return this.partnerModel
+      .findOne({ phoneNumber, ...buildOrganizationFilter(organization) })
+      .exec();
   }
 
   async findAll(organization: Organization) {
-    const partners = await this.partnerModel.find({ organization }).exec();
+    const partners = await this.partnerModel
+      .find(buildOrganizationFilter(organization))
+      .exec();
     return Promise.all(partners.map((p) => this.attachStats(p)));
   }
 
@@ -128,8 +133,41 @@ export class PartnersService {
     return this.attachStats(partner);
   }
 
+  /**
+   * Admin feature: Issue tokens for a partner account (impersonation)
+   * Allows admins to access partner accounts and perform actions as that partner
+   */
+  async accessPartnerAsAdmin(
+    partnerId: string,
+    organization: Organization,
+  ): Promise<{
+    user: PartnerDocument;
+    accessToken: string;
+    refreshToken: string;
+  }> {
+    const partner = await this.partnerModel
+      .findOne({
+        _id: partnerId,
+        ...buildOrganizationFilter(organization),
+      })
+      .exec();
+
+    if (!partner) {
+      throw new UnauthorizedException('Partner not found');
+    }
+
+    if (!partner.isActive) {
+      throw new UnauthorizedException('Partner account is inactive');
+    }
+
+    // Issue tokens as if the partner logged in
+    return this.issueTokens(partner);
+  }
+
   async getCustomers(partnerId: string, organization: Organization) {
-    return this.customerModel.find({ partnerId, organization }).exec();
+    return this.customerModel
+      .find({ partnerId, ...buildOrganizationFilter(organization) })
+      .exec();
   }
 
   // Send OTP via Event and Cache
@@ -173,7 +211,7 @@ export class PartnersService {
 
   async login(phoneNumber: string, otp: string, organization: Organization) {
     const partner = await this.partnerModel
-      .findOne({ phoneNumber, organization })
+      .findOne({ phoneNumber, ...buildOrganizationFilter(organization) })
       .select('+role')
       .exec();
 
@@ -280,7 +318,7 @@ export class PartnersService {
       const existingPartner = await this.partnerModel
         .findOne({
           phoneNumber: updateData.phoneNumber,
-          organization: partner.organization,
+          ...buildOrganizationFilter(partner.organization),
           _id: { $ne: partner._id },
         })
         .exec();
@@ -294,7 +332,7 @@ export class PartnersService {
       const existingPartner = await this.partnerModel
         .findOne({
           email: updateData.email?.toLowerCase().trim(),
-          organization: partner.organization,
+          ...buildOrganizationFilter(partner.organization),
           _id: { $ne: partner._id },
         })
         .exec();

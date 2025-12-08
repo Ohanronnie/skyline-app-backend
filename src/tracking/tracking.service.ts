@@ -8,6 +8,8 @@ import {
   ContainerStatus,
 } from '../containers/containers.schema';
 import { Tracking, TrackingDocument } from './tracking.schema';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
+import { Organization } from '../user/users.schema';
 
 @Injectable()
 export class TrackingService {
@@ -20,15 +22,18 @@ export class TrackingService {
     private readonly trackingModel: Model<TrackingDocument>,
   ) {}
 
-  async trackNumber(number: string, organization: string) {
-   // console.log(await this.trackingModel.find({}).exec());
+  async trackNumber(number: string, organization: Organization) {
+    // console.log(await this.trackingModel.find({}).exec());
     const trackingEntries = await this.trackingModel
       .find({ trackingNumber: number })
       .sort({ createdAt: 1 })
       .exec();
     // Search for shipment first
     const shipment = await this.shipmentModel
-      .findOne({ trackingNumber: number, organization })
+      .findOne({
+        trackingNumber: number,
+        ...buildOrganizationFilter(organization),
+      })
       .exec();
     if (shipment)
       return {
@@ -39,7 +44,10 @@ export class TrackingService {
 
     // Then search for container
     const container = await this.containerModel
-      .findOne({ containerNumber: number, organization })
+      .findOne({
+        containerNumber: number,
+        ...buildOrganizationFilter(organization),
+      })
       .exec();
     if (container)
       return {
@@ -51,14 +59,17 @@ export class TrackingService {
     return { type: 'unknown', data: null, tracking: trackingEntries };
   }
 
-  async activeContainers(organization: string) {
+  async activeContainers(organization: Organization) {
     const activeStatuses: ContainerStatus[] = [
       ContainerStatus.LOADING,
       ContainerStatus.LOADED,
       ContainerStatus.IN_TRANSIT,
     ];
     return this.containerModel
-      .find({ status: { $in: activeStatuses }, organization })
+      .find({
+        status: { $in: activeStatuses },
+        ...buildOrganizationFilter(organization),
+      })
       .exec();
   }
 

@@ -16,6 +16,7 @@ import {
 } from '../tracking/tracking.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ShipmentStatusUpdatedEvent } from '../events/shipment.events';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 
 @Injectable()
 export class ShipmentsService {
@@ -51,7 +52,7 @@ export class ShipmentsService {
     const existing = await this.shipmentModel
       .findOne({
         trackingNumber: dto.trackingNumber,
-        organization,
+        ...buildOrganizationFilter(organization),
       })
       .exec();
 
@@ -157,7 +158,9 @@ export class ShipmentsService {
     partnerId?: string,
     customerId?: string,
   ): Promise<ShipmentDocument[]> {
-    const baseFilter: FilterQuery<ShipmentDocument> = { organization };
+    const baseFilter: FilterQuery<ShipmentDocument> = {
+      ...buildOrganizationFilter(organization),
+    };
     if (partnerId) {
       baseFilter.partnerId = partnerId;
     }
@@ -192,7 +195,7 @@ export class ShipmentsService {
     organization: Organization,
   ): Promise<ShipmentDocument> {
     const found = await this.shipmentModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name phone email location')
       .populate('partnerId', 'name phone email')
       .populate('containerId', 'containerNumber')
@@ -210,7 +213,7 @@ export class ShipmentsService {
   ): Promise<ShipmentDocument> {
     // First, fetch the existing shipment to check partnerId
     const existingShipment = await this.shipmentModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (!existingShipment) {
@@ -291,7 +294,7 @@ export class ShipmentsService {
 
     const updated = await this.shipmentModel
       .findOneAndUpdate(
-        { _id: id, organization },
+        { _id: id, ...buildOrganizationFilter(organization) },
         { $set: updateData },
         { new: true },
       )
@@ -324,7 +327,7 @@ export class ShipmentsService {
     // Sanitize input to prevent ReDoS attacks
     const sanitized = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const filter: FilterQuery<ShipmentDocument> = {
-      organization,
+      ...buildOrganizationFilter(organization),
       $or: [
         { trackingNumber: { $regex: sanitized, $options: 'i' } },
         { description: { $regex: sanitized, $options: 'i' } },
@@ -335,7 +338,7 @@ export class ShipmentsService {
 
   async delete(id: string, organization: Organization): Promise<void> {
     const result = await this.shipmentModel
-      .deleteOne({ _id: id, organization })
+      .deleteOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (result.deletedCount === 0) {

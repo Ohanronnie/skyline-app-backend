@@ -17,6 +17,7 @@ import { Customer, CustomerDocument } from './customers.schema';
 import { Shipment, ShipmentDocument } from '../shipments/shipments.schema';
 import { Organization } from '../user/users.schema';
 import { SmsSendEvent } from '../events/sms.events';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 
 @Injectable()
 export class CustomersService {
@@ -39,7 +40,10 @@ export class CustomersService {
     // Check for duplicate email
     if (data.email) {
       const existingEmail = await this.customerModel
-        .findOne({ email: data.email.toLowerCase(), organization })
+        .findOne({
+          email: data.email.toLowerCase(),
+          ...buildOrganizationFilter(organization),
+        })
         .exec();
       if (existingEmail) {
         throw new ConflictException(
@@ -51,7 +55,10 @@ export class CustomersService {
     // Check for duplicate phone
     if (data.phone) {
       const existingPhone = await this.customerModel
-        .findOne({ phone: data.phone, organization })
+        .findOne({
+          phone: data.phone,
+          ...buildOrganizationFilter(organization),
+        })
         .exec();
       if (existingPhone) {
         throw new ConflictException(
@@ -84,7 +91,7 @@ export class CustomersService {
     organization: Organization,
     partnerId?: string,
   ): Promise<CustomerDocument[]> {
-    const filter: any = { organization };
+    const filter: any = { ...buildOrganizationFilter(organization) };
     if (partnerId) {
       filter.partnerId = partnerId;
     }
@@ -96,7 +103,7 @@ export class CustomersService {
     organization: Organization,
   ): Promise<CustomerDocument> {
     const found = await this.customerModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
     if (!found) throw new NotFoundException('Customer not found');
     return found;
@@ -113,7 +120,10 @@ export class CustomersService {
     organization: Organization,
   ): Promise<CustomerDocument | null> {
     return this.customerModel
-      .findOne({ email: email.toLowerCase(), organization })
+      .findOne({
+        email: email.toLowerCase(),
+        ...buildOrganizationFilter(organization),
+      })
       .exec();
   }
 
@@ -125,7 +135,7 @@ export class CustomersService {
   ): Promise<CustomerDocument> {
     // First, verify the customer exists and belongs to the partner (if partnerId provided)
     const existingCustomer = await this.customerModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (!existingCustomer) {
@@ -142,7 +152,7 @@ export class CustomersService {
       const existingEmail = await this.customerModel
         .findOne({
           email: data.email.toLowerCase(),
-          organization,
+          ...buildOrganizationFilter(organization),
           _id: { $ne: id },
         })
         .exec();
@@ -158,7 +168,7 @@ export class CustomersService {
       const existingPhone = await this.customerModel
         .findOne({
           phone: data.phone,
-          organization,
+          ...buildOrganizationFilter(organization),
           _id: { $ne: id },
         })
         .exec();
@@ -175,7 +185,7 @@ export class CustomersService {
         updateData.email = updateData.email.toLowerCase();
       }
 
-      const filter: any = { _id: id, organization };
+      const filter: any = { _id: id, ...buildOrganizationFilter(organization) };
       if (partnerId) {
         filter.partnerId = partnerId;
       }
@@ -202,7 +212,9 @@ export class CustomersService {
     organization: Organization,
   ): Promise<ShipmentDocument[]> {
     await this.findOne(id, organization);
-    return this.shipmentModel.find({ customerId: id, organization }).exec();
+    return this.shipmentModel
+      .find({ customerId: id, ...buildOrganizationFilter(organization) })
+      .exec();
   }
 
   async search(
@@ -212,7 +224,7 @@ export class CustomersService {
     // Sanitize input to prevent ReDoS attacks
     const sanitized = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const filter = {
-      organization,
+      ...buildOrganizationFilter(organization),
       $or: [
         { name: { $regex: sanitized, $options: 'i' } },
         { email: { $regex: sanitized, $options: 'i' } },
@@ -276,7 +288,7 @@ export class CustomersService {
 
   async login(phoneNumber: string, otp: string, organization: Organization) {
     const customer = await this.customerModel
-      .findOne({ phone: phoneNumber, organization })
+      .findOne({ phone: phoneNumber, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (!customer) {

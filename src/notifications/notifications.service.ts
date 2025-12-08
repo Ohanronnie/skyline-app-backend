@@ -14,6 +14,7 @@ import {
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { Organization } from '../user/users.schema';
 import { InjectModel as InjectMongooseModel } from '@nestjs/mongoose';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 import { Customer, CustomerDocument } from '../customers/customers.schema';
 import { Partner, PartnerDocument } from '../partners/partners.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -51,7 +52,11 @@ export class NotificationsService {
     skip = 0,
   ): Promise<NotificationDocument[]> {
     return this.notificationModel
-      .find({ organization, recipientId, recipientType })
+      .find({
+        ...buildOrganizationFilter(organization),
+        recipientId,
+        recipientType,
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -65,7 +70,7 @@ export class NotificationsService {
   ): Promise<number> {
     return this.notificationModel
       .countDocuments({
-        organization,
+        ...buildOrganizationFilter(organization),
         recipientId,
         recipientType,
         read: false,
@@ -80,7 +85,7 @@ export class NotificationsService {
   ): Promise<NotificationDocument> {
     const notification = await this.notificationModel
       .findOneAndUpdate(
-        { _id: id, organization, recipientId }, // Ensure user owns the notification
+        { _id: id, ...buildOrganizationFilter(organization), recipientId }, // Ensure user owns the notification
         { read: true },
         { new: true },
       )
@@ -100,7 +105,12 @@ export class NotificationsService {
   ): Promise<void> {
     await this.notificationModel
       .updateMany(
-        { organization, recipientId, recipientType, read: false },
+        {
+          ...buildOrganizationFilter(organization),
+          recipientId,
+          recipientType,
+          read: false,
+        },
         { read: true },
       )
       .exec();
@@ -112,7 +122,11 @@ export class NotificationsService {
     recipientId: string,
   ): Promise<void> {
     const result = await this.notificationModel
-      .deleteOne({ _id: id, organization, recipientId })
+      .deleteOne({
+        _id: id,
+        ...buildOrganizationFilter(organization),
+        recipientId,
+      })
       .exec();
 
     if (result.deletedCount === 0) {
@@ -151,12 +165,14 @@ export class NotificationsService {
       target === BroadcastTarget.ALL ||
       target === BroadcastTarget.CUSTOMERS
     ) {
-      customers = await this.customerModel.find({ organization }).exec();
+      customers = await this.customerModel
+        .find(buildOrganizationFilter(organization))
+        .exec();
     }
 
     if (target === BroadcastTarget.ALL || target === BroadcastTarget.PARTNERS) {
       partners = await this.partnerModel
-        .find({ organization, isActive: true })
+        .find({ ...buildOrganizationFilter(organization), isActive: true })
         .exec();
     }
 
@@ -171,7 +187,10 @@ export class NotificationsService {
       }
       if (target === BroadcastTarget.CUSTOMER) {
         const customer = await this.customerModel
-          .findOne({ _id: recipientId, organization })
+          .findOne({
+            _id: recipientId,
+            ...buildOrganizationFilter(organization),
+          })
           .exec();
         if (!customer) {
           throw new NotFoundException('Customer not found');
@@ -179,7 +198,11 @@ export class NotificationsService {
         customers = [customer];
       } else {
         const partner = await this.partnerModel
-          .findOne({ _id: recipientId, organization, isActive: true })
+          .findOne({
+            _id: recipientId,
+            ...buildOrganizationFilter(organization),
+            isActive: true,
+          })
           .exec();
         if (!partner) {
           throw new NotFoundException('Partner not found');

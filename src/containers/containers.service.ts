@@ -16,6 +16,7 @@ import {
 import { LoadShipmentsDto } from './dto/load-shipments.dto';
 import { Organization } from '../user/users.schema';
 import { Customer, CustomerDocument } from '../customers/customers.schema';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 
 @Injectable()
 export class ContainersService {
@@ -52,7 +53,10 @@ export class ContainersService {
     if (partnerId) {
       // Find containers that have shipments belonging to this partner
       const shipments = await this.shipmentModel
-        .find({ partnerId: partnerId, organization })
+        .find({
+          partnerId: partnerId,
+          ...buildOrganizationFilter(organization),
+        })
         .select('containerId')
         .exec();
 
@@ -69,12 +73,15 @@ export class ContainersService {
       }
 
       containers = await this.containerModel
-        .find({ _id: { $in: containerIds }, organization })
+        .find({
+          _id: { $in: containerIds },
+          ...buildOrganizationFilter(organization),
+        })
         .populate('customerId', 'name email phone location type')
         .exec();
     } else {
       containers = await this.containerModel
-        .find({ organization })
+        .find(buildOrganizationFilter(organization))
         .populate('customerId', 'name email phone location type')
         .exec();
     }
@@ -86,7 +93,7 @@ export class ContainersService {
         const shipmentCount = await this.shipmentModel
           .countDocuments({
             containerId: container._id.toString(),
-            organization,
+            ...buildOrganizationFilter(organization),
           })
           .exec();
 
@@ -94,7 +101,7 @@ export class ContainersService {
         const shipments = await this.shipmentModel
           .find({
             containerId: container._id.toString(),
-            organization,
+            ...buildOrganizationFilter(organization),
           })
           .populate('customerId', 'name email phone location type')
           .populate('partnerId', 'name phone email')
@@ -119,7 +126,10 @@ export class ContainersService {
         const customers =
           customerIds.length > 0
             ? await this.customerModel
-                .find({ _id: { $in: customerIds }, organization })
+                .find({
+                  _id: { $in: customerIds },
+                  ...buildOrganizationFilter(organization),
+                })
                 .select('name email phone location type')
                 .exec()
             : [];
@@ -158,7 +168,7 @@ export class ContainersService {
 
   async findOne(id: string, organization: Organization): Promise<any> {
     const container = await this.containerModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name email phone location type')
       .exec();
     if (!container) throw new NotFoundException('Container not found');
@@ -167,7 +177,7 @@ export class ContainersService {
     const shipmentCount = await this.shipmentModel
       .countDocuments({
         containerId: container._id.toString(),
-        organization,
+        ...buildOrganizationFilter(organization),
       })
       .exec();
 
@@ -175,7 +185,7 @@ export class ContainersService {
     const shipments = await this.shipmentModel
       .find({
         containerId: container._id.toString(),
-        organization,
+        ...buildOrganizationFilter(organization),
       })
       .populate('customerId', 'name email phone location type')
       .populate('partnerId', 'name phone email')
@@ -201,7 +211,10 @@ export class ContainersService {
     const customers =
       customerIds.length > 0
         ? await this.customerModel
-            .find({ _id: { $in: customerIds }, organization })
+            .find({
+              _id: { $in: customerIds },
+              ...buildOrganizationFilter(organization),
+            })
             .select('name email phone location type')
             .exec()
         : [];
@@ -251,7 +264,7 @@ export class ContainersService {
     }
 
     const existing = await this.containerModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (!existing) {
@@ -303,7 +316,7 @@ export class ContainersService {
 
     const updated = await this.containerModel
       .findOneAndUpdate(
-        { _id: id, organization },
+        { _id: id, ...buildOrganizationFilter(organization) },
         { $set: updateData },
         { new: true },
       )
@@ -319,7 +332,10 @@ export class ContainersService {
   ) {
     const container = await this.findOne(containerId, organization);
     const shipments = await this.shipmentModel
-      .find({ _id: { $in: dto.shipmentIds }, organization })
+      .find({
+        _id: { $in: dto.shipmentIds },
+        ...buildOrganizationFilter(organization),
+      })
       .exec();
 
     if (shipments.length !== dto.shipmentIds.length) {
@@ -327,7 +343,10 @@ export class ContainersService {
     }
 
     await this.shipmentModel.updateMany(
-      { _id: { $in: dto.shipmentIds }, organization },
+      {
+        _id: { $in: dto.shipmentIds },
+        ...buildOrganizationFilter(organization),
+      },
       { $set: { containerId: container._id, status: ShipmentStatus.LOADED } },
     );
 
@@ -336,7 +355,9 @@ export class ContainersService {
 
   async listShipments(containerId: string, organization: Organization) {
     await this.findOne(containerId, organization);
-    return this.shipmentModel.find({ containerId, organization }).exec();
+    return this.shipmentModel
+      .find({ containerId, ...buildOrganizationFilter(organization) })
+      .exec();
   }
 
   async assignCustomer(
@@ -347,7 +368,7 @@ export class ContainersService {
     userId?: string,
   ): Promise<ContainerDocument> {
     const container = await this.containerModel
-      .findOne({ _id: containerId, organization })
+      .findOne({ _id: containerId, ...buildOrganizationFilter(organization) })
       .exec();
     if (!container) {
       throw new NotFoundException('Container not found');
@@ -388,7 +409,7 @@ export class ContainersService {
     if (customerId) {
       // Verify customer exists
       const customer = await this.customerModel
-        .findOne({ _id: customerId, organization })
+        .findOne({ _id: customerId, ...buildOrganizationFilter(organization) })
         .exec();
       if (!customer) {
         throw new NotFoundException('Customer not found');
@@ -397,7 +418,7 @@ export class ContainersService {
 
     const updated = await this.containerModel
       .findOneAndUpdate(
-        { _id: containerId, organization },
+        { _id: containerId, ...buildOrganizationFilter(organization) },
         { $set: { customerId: customerId || null } },
         { new: true },
       )
@@ -415,7 +436,7 @@ export class ContainersService {
     // Check if container has shipments
     const shipmentsCount = await this.shipmentModel.countDocuments({
       containerId: id,
-      organization,
+      ...buildOrganizationFilter(organization),
     });
 
     if (shipmentsCount > 0) {
@@ -425,7 +446,7 @@ export class ContainersService {
     }
 
     const result = await this.containerModel
-      .deleteOne({ _id: id, organization })
+      .deleteOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
 
     if (result.deletedCount === 0) {

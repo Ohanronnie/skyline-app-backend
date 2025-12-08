@@ -10,6 +10,7 @@ import { Shipment, ShipmentDocument } from '../shipments/shipments.schema';
 import { CreateCargoDto } from './dto/create-cargo.dto';
 import { UpdateCargoDto } from './dto/update-cargo.dto';
 import { Organization } from '../user/users.schema';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 
 @Injectable()
 export class CargoService {
@@ -64,14 +65,14 @@ export class CargoService {
 
   async findAll(organization: Organization) {
     return this.cargoModel
-      .find({ organization })
+      .find(buildOrganizationFilter(organization))
       .sort({ createdAt: -1 })
       .exec();
   }
 
   async findOneWithPackages(id: string, organization: Organization) {
     const cargo = await this.cargoModel
-      .findOne({ _id: id, organization })
+      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name email phone')
       .populate('partnerId', 'name email phoneNumber')
       .exec();
@@ -86,7 +87,7 @@ export class CargoService {
       packages = await this.shipmentModel
         .find({
           containerId: cargo.containerId,
-          organization,
+          ...buildOrganizationFilter(organization),
         })
         .populate('customerId', 'name email phone')
         .populate('partnerId', 'name email phoneNumber')
@@ -134,9 +135,13 @@ export class CargoService {
     }
 
     const cargo = await this.cargoModel
-      .findOneAndUpdate({ _id: id, organization }, updateData, {
-        new: true,
-      })
+      .findOneAndUpdate(
+        { _id: id, ...buildOrganizationFilter(organization) },
+        updateData,
+        {
+          new: true,
+        },
+      )
       .exec();
 
     if (!cargo) {
@@ -148,7 +153,7 @@ export class CargoService {
 
   async delete(id: string, organization: Organization): Promise<void> {
     const result = await this.cargoModel
-      .findOneAndDelete({ _id: id, organization })
+      .findOneAndDelete({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
     if (!result) {
       throw new NotFoundException('Cargo not found');

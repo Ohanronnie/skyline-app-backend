@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -18,10 +18,14 @@ import {
   ReportMode,
   ReportType,
 } from './dto/generate-excel-report.dto';
+import { Organization } from '../user/users.schema';
+import { buildOrganizationFilter } from '../auth/organization-filter.util';
 import ExcelJS from 'exceljs';
 
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
     @InjectModel(Shipment.name)
     private readonly shipmentModel: Model<ShipmentDocument>,
@@ -73,14 +77,25 @@ export class ReportsService {
     return { export: 'ok', type: payload?.type ?? 'json' };
   }
 
-  async exportExcel(dto: GenerateExcelReportDto): Promise<Uint8Array> {
+  async exportExcel(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ): Promise<Uint8Array> {
+    this.logger.log(
+      `[exportExcel] Starting export - type: ${dto.type}, mode: ${dto.mode}`,
+    );
+    this.logger.log(`[exportExcel] DTO: ${JSON.stringify(dto)}`);
+    this.logger.log(
+      `[exportExcel] Organization: ${organization || 'not provided'}`,
+    );
+
     switch (dto.type) {
       case ReportType.SHIPMENTS:
-        return this.exportShipmentsExcel(dto);
+        return this.exportShipmentsExcel(dto, organization);
       case ReportType.CUSTOMERS:
-        return this.exportCustomersExcel(dto);
+        return this.exportCustomersExcel(dto, organization);
       case ReportType.CONTAINERS:
-        return this.exportContainersExcel(dto);
+        return this.exportContainersExcel(dto, organization);
       default:
         throw new Error('Unsupported report type');
     }
@@ -101,8 +116,17 @@ export class ReportsService {
 
   private async exportShipmentsExcel(
     dto: GenerateExcelReportDto,
+    organization?: Organization,
   ): Promise<Uint8Array> {
+    this.logger.log(`[exportShipmentsExcel] Starting - mode: ${dto.mode}`);
+    this.logger.log(
+      `[exportShipmentsExcel] Full DTO: ${JSON.stringify(dto, null, 2)}`,
+    );
+
     const { from, to } = this.parseDateRange(dto);
+    this.logger.log(
+      `[exportShipmentsExcel] Date range - from: ${from}, to: ${to}`,
+    );
 
     const query: any = {};
     if (from || to) {
@@ -112,16 +136,57 @@ export class ReportsService {
     }
     if (dto.partnerId) {
       query.partnerId = new Types.ObjectId(dto.partnerId);
+      this.logger.log(
+        `[exportShipmentsExcel] Filtering by partnerId: ${dto.partnerId}`,
+      );
     }
     if (dto.customerId) {
-      query.customerId = new Types.ObjectId(dto.customerId);
+      query.customerId = (dto.customerId).toString();
+      this.logger.log(
+        `[exportShipmentsExcel] Filtering by customerId: ${dto.customerId}`,
+      );
     }
     if (dto.containerId) {
-      query.containerId = new Types.ObjectId(dto.containerId);
+      query.containerId = (dto.containerId).toString();
+      this.logger.log(
+        `[exportShipmentsExcel] Filtering by containerId: ${dto.containerId}`,
+      );
     }
     if (dto.shipmentStatuses?.length) {
       query.status = { $in: dto.shipmentStatuses };
+      this.logger.log(
+        `[exportShipmentsExcel] Filtering by statuses: ${dto.shipmentStatuses.join(', ')}`,
+      );
     }
+
+    // Handle selectedShipments if provided (from frontend payload)
+    const payload = (dto as any).payload;
+    if (
+      payload?.selectedShipments &&
+      Array.isArray(payload.selectedShipments) &&
+      payload.selectedShipments.length > 0
+    ) {
+      query._id = {
+        $in: payload.selectedShipments.map(
+          (id: string) => id.toString(),
+        ),
+      };
+      this.logger.log(
+        `[exportShipmentsExcel] Filtering by selectedShipments: ${payload.selectedShipments.length} shipments`,
+      );
+    }
+
+    // Apply organization filter if provided
+    if (organization) {
+      Object.assign(query, buildOrganizationFilter(organization));
+      this.logger.log(
+        `[exportShipmentsExcel] Applied organization filter: ${organization}`,
+      );
+    }
+
+    this.logger.log(
+      `[exportShipmentsExcel] Final query: ${JSON.stringify(query, null, 2)}`,
+    );
 
     const shipments = await this.shipmentModel
       .find(query)
@@ -131,8 +196,28 @@ export class ReportsService {
       .sort({ createdAt: -1 })
       .exec();
 
+    this.logger.log(
+      `[exportShipmentsExcel] Found ${shipments.length} shipments`,
+    );
+    if (shipments.length === 0) {
+      this.logger.warn(
+        `[exportShipmentsExcel] No shipments found with query: ${JSON.stringify(query)}`,
+      );
+    } else {
+      this.logger.log(
+        `[exportShipmentsExcel] Sample shipment IDs: ${shipments
+          .slice(0, 3)
+          .map((s) => s._id.toString())
+          .join(', ')}`,
+      );
+    }
+
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Shipments');
+
+    this.logger.log(
+      `[exportShipmentsExcel] Creating Excel workbook - mode: ${dto.mode}`,
+    );
 
     if (dto.mode === ReportMode.SUMMARY) {
       // Summary: totals and per customer/per partner
@@ -141,6 +226,10 @@ export class ReportsService {
       const totalQuantity = shipments.reduce(
         (sum, s) => sum + (s.quantity || 0),
         0,
+      );
+
+      this.logger.log(
+        `[exportShipmentsExcel] Summary totals - shipments: ${totalShipments}, CBM: ${totalCbm}, Qty: ${totalQuantity}`,
       );
 
       sheet.addRow(['Summary']);
@@ -194,7 +283,14 @@ export class ReportsService {
       for (const entry of byPartner.values()) {
         sheet.addRow([entry.name, entry.count, entry.cbm, entry.qty]);
       }
+
+      this.logger.log(
+        `[exportShipmentsExcel] Summary - customers: ${byCustomer.size}, partners: ${byPartner.size}`,
+      );
     } else {
+      this.logger.log(
+        `[exportShipmentsExcel] Detailed mode - adding ${shipments.length} rows`,
+      );
       // Detailed
       sheet.addRow([
         'Tracking Number',
@@ -240,6 +336,7 @@ export class ReportsService {
 
   private async exportCustomersExcel(
     dto: GenerateExcelReportDto,
+    organization?: Organization,
   ): Promise<Uint8Array> {
     const query: any = {};
     if (dto.customerTypes?.length) {
@@ -318,6 +415,7 @@ export class ReportsService {
 
   private async exportContainersExcel(
     dto: GenerateExcelReportDto,
+    organization?: Organization,
   ): Promise<Uint8Array> {
     const { from, to } = this.parseDateRange(dto);
 

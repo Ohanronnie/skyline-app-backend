@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsEmail } from 'class-validator';
+import { IsGhanaPhone } from '../../common/validators/phone.validator';
 
 export class UpdatePartnerDto {
   @IsOptional()
@@ -15,6 +16,7 @@ export class UpdatePartnerDto {
 
   @IsOptional()
   @IsString()
+  @IsGhanaPhone()
   phoneNumber?: string;
 
   @IsOptional()

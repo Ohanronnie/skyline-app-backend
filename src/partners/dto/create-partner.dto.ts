@@ -6,6 +6,7 @@ import {
   IsOptional,
 } from 'class-validator';
 import { Organization } from '../../user/users.schema';
+import { IsGhanaPhone } from '../../common/validators/phone.validator';
 
 export class CreatePartnerDto {
   @IsString()
@@ -14,6 +15,7 @@ export class CreatePartnerDto {
 
   @IsString()
   @IsNotEmpty()
+  @IsGhanaPhone()
   phoneNumber: string;
 
   @IsOptional()

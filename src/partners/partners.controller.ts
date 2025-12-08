@@ -15,8 +15,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../user/users.schema';
 import { PartnerLoginDto } from './dto/partner-login.dto';
+import { PartnerSendOtpDto } from './dto/partner-send-otp.dto';
 import { CreatePartnerDto } from './dto/create-partner.dto';
 import { UpdatePartnerDto } from './dto/update-partner.dto';
+import { AccessPartnerDto } from './dto/access-partner.dto';
 import { CurrentOrganization } from '../auth/organization.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtRefreshAuthGuard } from '../auth/guards/jwt-refresh.guard';
@@ -36,8 +38,8 @@ export class PartnersController {
   }
 
   @Post('auth/otp')
-  async sendOtp(@Body('phoneNumber') phoneNumber: string) {
-    return this.partnersService.sendOtp(phoneNumber);
+  async sendOtp(@Body() dto: PartnerSendOtpDto) {
+    return this.partnersService.sendOtp(dto.phoneNumber);
   }
 
   @Throttle({ auth: { limit: 10, ttl: 60000 } })
@@ -67,6 +69,23 @@ export class PartnersController {
   async home(@CurrentUser() user: any) {
     // Partner home dashboard data
     return this.partnersService.dashboard(user.userId);
+  }
+
+  /**
+   * Admin feature: Access partner account (impersonation)
+   * Allows admins to get tokens to act as a partner
+   */
+  @Post('admin/access')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async accessPartner(
+    @Body() dto: AccessPartnerDto,
+    @CurrentOrganization() organization: Organization,
+  ) {
+    return this.partnersService.accessPartnerAsAdmin(
+      dto.partnerId,
+      organization,
+    );
   }
 
   @Get('me/customers')
