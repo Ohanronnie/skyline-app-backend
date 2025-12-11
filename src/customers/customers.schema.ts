@@ -10,9 +10,27 @@ export enum CustomerType {
 }
 
 export enum CustomerLocation {
+  // International
   CHINA = 'china',
-  ACCRA = 'accra',
-  KUMASI = 'kumasi',
+  // Ghana Regions
+  GREATER_ACCRA = 'greater_accra',
+  ACCRA = 'accra', // Legacy/shorthand for Greater Accra
+  ASHANTI = 'ashanti',
+  KUMASI = 'kumasi', // Legacy/shorthand for Ashanti
+  WESTERN = 'western',
+  CENTRAL = 'central',
+  EASTERN = 'eastern',
+  VOLTA = 'volta',
+  OTI = 'oti',
+  NORTHERN = 'northern',
+  SAVANNAH = 'savannah',
+  NORTH_EAST = 'north_east',
+  UPPER_EAST = 'upper_east',
+  UPPER_WEST = 'upper_west',
+  BONO = 'bono',
+  BONO_EAST = 'bono_east',
+  AHAFO = 'ahafo',
+  WESTERN_NORTH = 'western_north',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false } })

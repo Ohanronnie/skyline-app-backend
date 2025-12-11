@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, Res, Query } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -43,9 +43,19 @@ export class ReportsController {
   @Post('export-excel')
   async exportExcel(
     @Body() dto: GenerateExcelReportDto,
+    @Query('status') status: string | string[] | undefined,
     @CurrentOrganization() organization: Organization,
     @Res() res: Response,
   ) {
+    // Merge status from query param into dto if provided
+    if (status) {
+      const statusArray = Array.isArray(status) ? status : [status];
+      dto.shipmentStatuses = [
+        ...(dto.shipmentStatuses || []),
+        ...statusArray,
+      ] as any;
+    }
+
     const buffer = await this.reportsService.exportExcel(dto, organization);
     res.setHeader(
       'Content-Type',

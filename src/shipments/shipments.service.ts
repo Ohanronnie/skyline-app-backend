@@ -182,6 +182,7 @@ export class ShipmentsService {
     }
     const shipments = await this.shipmentModel
       .find(baseFilter)
+      .sort({ createdAt: -1 })
       .populate('customerId', 'name phone email location')
       .populate('partnerId', 'name phone email')
       .populate('containerId', 'containerNumber')
