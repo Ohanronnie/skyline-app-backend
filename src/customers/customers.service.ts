@@ -102,9 +102,12 @@ export class CustomersService {
     id: string,
     organization: Organization,
   ): Promise<CustomerDocument> {
+    let filter = { _id: id, ...buildOrganizationFilter(organization) };
+    console.log("filter-", filter);
     const found = await this.customerModel
-      .findOne({ _id: id, ...buildOrganizationFilter(organization) })
+      .findOne(filter)
       .exec();
+    console.log("after findOne-", found);
     if (!found) throw new NotFoundException('Customer not found');
     return found;
   }
@@ -211,10 +214,15 @@ export class CustomersService {
     id: string,
     organization: Organization,
   ): Promise<ShipmentDocument[]> {
+    console.log("organization", organization)
+    console.log("before findOne");
     await this.findOne(id, organization);
-    return this.shipmentModel
+    console.log("after findOne");
+    let shipments = await this.shipmentModel
       .find({ customerId: id, ...buildOrganizationFilter(organization) })
       .exec();
+    console.log(shipments);
+    return shipments;
   }
 
   async search(

@@ -40,6 +40,9 @@ export class Shipment {
   @Prop({ type: Types.ObjectId, ref: 'Partner', required: false, index: true })
   partnerId?: string;
 
+  @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
+  partnerCustomerId?: string;
+
   @Prop()
   description?: string;
 

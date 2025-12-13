@@ -36,16 +36,28 @@ export class ShipmentsController {
     const warehouseIds =
       await this.locationFilter.getAccessibleWarehouseIds(user);
 
-    const partnerId =
-      user.isPartner || user.role === 'partner' ? user.userId : undefined;
+    const isPartner = user.isPartner || user.role === 'partner';
+    const partnerId = isPartner ? user.userId : undefined;
     const customerId =
       user.isCustomer || user.role === 'customer' ? user.userId : undefined;
-    return this.shipmentsService.findAll(
+    const shipments = await this.shipmentsService.findAll(
       organization,
       warehouseIds,
       partnerId,
       customerId,
     );
+
+    // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    if (isPartner) {
+      return shipments.map((shipment) => {
+        const s = shipment.toObject();
+        // Partners only see their own customer, not admin's customer
+        s.customerId = s.partnerCustomerId || undefined;
+        return s;
+      });
+    }
+
+    return shipments;
   }
 
   @Post()
@@ -73,8 +85,20 @@ export class ShipmentsController {
   async findOne(
     @Param('id') id: string,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
-    return this.shipmentsService.findOne(id, organization);
+    const shipment = await this.shipmentsService.findOne(id, organization);
+
+    // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    const isPartner = user.isPartner || user.role === 'partner';
+    if (isPartner) {
+      const s = shipment.toObject();
+      // Partners only see their own customer, not admin's customer
+      s.customerId = s.partnerCustomerId || undefined;
+      return s;
+    }
+
+    return shipment;
   }
 
   @Put(':id')

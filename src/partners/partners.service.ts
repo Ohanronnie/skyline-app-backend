@@ -274,16 +274,25 @@ export class PartnersService {
       throw new UnauthorizedException('Partner not found');
     }
 
-    const [stats, recentShipments] = await Promise.all([
+    const [stats, recentShipmentsRaw] = await Promise.all([
       this.attachStats(partner),
       this.shipmentModel
         .find({ partnerId: partner._id.toString() })
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('trackingNumber status createdAt customerId')
+        .select('trackingNumber status createdAt customerId partnerCustomerId')
         .populate('customerId', 'name email phone location type')
+        .populate('partnerCustomerId', 'name email phone location type')
         .exec(),
     ]);
+
+    // Transform shipments: use partnerCustomerId as customerId for frontend compatibility
+    const recentShipments = recentShipmentsRaw.map((shipment) => {
+      const s = shipment.toObject();
+      // Partners only see their own customer, not admin's customer
+      s.customerId = s.partnerCustomerId || undefined;
+      return s;
+    });
 
     return {
       partner: stats,

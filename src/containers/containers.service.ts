@@ -33,13 +33,6 @@ export class ContainersService {
     dto: CreateContainerDto,
     organization: Organization,
   ): Promise<ContainerDocument> {
-    // Prevent assigning both customerId and partnerId
-    if (dto.customerId && dto.partnerId) {
-      throw new BadRequestException(
-        'Container cannot be assigned to both a customer and a partner',
-      );
-    }
-
     const doc = new this.containerModel({ ...dto, organization });
     return doc.save();
   }
@@ -78,11 +71,13 @@ export class ContainersService {
           ...buildOrganizationFilter(organization),
         })
         .populate('customerId', 'name email phone location type')
+        .populate('partnerCustomerId', 'name email phone location type')
         .exec();
     } else {
       containers = await this.containerModel
         .find(buildOrganizationFilter(organization))
         .populate('customerId', 'name email phone location type')
+        .populate('partnerCustomerId', 'name email phone location type')
         .exec();
     }
 
@@ -170,6 +165,7 @@ export class ContainersService {
     const container = await this.containerModel
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name email phone location type')
+      .populate('partnerCustomerId', 'name email phone location type')
       .exec();
     if (!container) throw new NotFoundException('Container not found');
 
@@ -256,13 +252,6 @@ export class ContainersService {
     userRole?: string,
     userId?: string,
   ): Promise<ContainerDocument> {
-    // Prevent assigning both customerId and partnerId
-    if (dto.customerId && dto.partnerId) {
-      throw new BadRequestException(
-        'Container cannot be assigned to both a customer and a partner',
-      );
-    }
-
     const existing = await this.containerModel
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .exec();
@@ -278,40 +267,29 @@ export class ContainersService {
           'Cannot change partner assignment once a container is assigned to a partner',
         );
       }
-      // Partners can assign customers to their containers
+      // Partners can only modify their own containers
       if (userRole === 'partner' && userId !== existing.partnerId.toString()) {
-        // Partner can only modify their own containers
         throw new BadRequestException(
           'You can only modify containers assigned to you',
         );
       }
-      // Admin cannot change customerId if container is assigned to a partner
-      if (userRole !== 'partner' && dto.customerId) {
-        throw new BadRequestException(
-          'Cannot assign customer to a container that is already assigned to a partner. Partner must assign the customer.',
-        );
-      }
     }
 
-    // Prevent changing existing customerId assignment
+    // Prevent changing existing customerId assignment (admin's customer)
     if (existing.customerId) {
       if (dto.customerId && dto.customerId !== existing.customerId.toString()) {
         throw new BadRequestException(
           'Cannot change customer assignment once a container is assigned to a customer',
         );
       }
-      // Prevent assigning partnerId if customerId exists
-      if (dto.partnerId) {
-        throw new BadRequestException(
-          'Cannot assign partner to a container that is already assigned to a customer',
-        );
-      }
     }
 
     const updateData = { ...dto };
-    // If user is a partner, prevent them from changing partnerId
-    if (userRole === 'partner' && 'partnerId' in updateData) {
+    // If user is a partner, they can only modify partnerCustomerId, not customerId or partnerId
+    if (userRole === 'partner') {
       delete updateData.partnerId;
+      delete updateData.customerId;
+      // Partners can only set partnerCustomerId
     }
 
     const updated = await this.containerModel

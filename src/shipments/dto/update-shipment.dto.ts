@@ -20,6 +20,10 @@ export class UpdateShipmentDto {
   partnerId?: string;
 
   @IsOptional()
+  @IsMongoId()
+  partnerCustomerId?: string;
+
+  @IsOptional()
   @IsString()
   description?: string;
 

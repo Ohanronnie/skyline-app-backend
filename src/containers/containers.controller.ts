@@ -30,9 +30,23 @@ export class ContainersController {
     @CurrentOrganization() organization: Organization,
     @CurrentUser() user: any,
   ) {
-    const partnerId =
-      user.isPartner || user.role === 'partner' ? user.userId : undefined;
-    return this.containersService.findAll(organization, partnerId);
+    const isPartner = user.isPartner || user.role === 'partner';
+    const partnerId = isPartner ? user.userId : undefined;
+    const containers = await this.containersService.findAll(
+      organization,
+      partnerId,
+    );
+
+    // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    if (isPartner) {
+      return containers.map((container: any) => {
+        // Partners only see their own customer, not admin's customer
+        container.customerId = container.partnerCustomerId || undefined;
+        return container;
+      });
+    }
+
+    return containers;
   }
 
   @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
@@ -53,8 +67,18 @@ export class ContainersController {
   async findOne(
     @Param('id') id: string,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
-    return this.containersService.findOne(id, organization);
+    const container = await this.containersService.findOne(id, organization);
+
+    // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    const isPartner = user.isPartner || user.role === 'partner';
+    if (isPartner) {
+      // Partners only see their own customer, not admin's customer
+      container.customerId = container.partnerCustomerId || undefined;
+    }
+
+    return container;
   }
 
   @Put(':id')

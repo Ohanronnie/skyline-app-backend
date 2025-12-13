@@ -97,10 +97,13 @@ export class CustomersController {
   }
 
   @Get(':id/shipments')
+  @UseGuards(JwtAuthGuard)
   async shipments(
     @Param('id') id: string,
     @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
   ) {
+    console.log(user);
     return this.customersService.shipments(id, organization);
   }
 }

@@ -56,17 +56,10 @@ export class ShipmentsService {
       })
       .exec();
 
-    // Prevent assigning both customerId and partnerId
-    if (dto.customerId && dto.partnerId) {
-      throw new BadRequestException(
-        'Shipment cannot be assigned to both a customer and a partner',
-      );
-    }
-
     const statusToPersist = dto.status ?? ShipmentStatus.RECEIVED;
 
     if (existing) {
-      // Prevent changing existing assignments
+      // Prevent changing existing assignments (but allow setting them if not already set)
       if (
         existing.partnerId &&
         dto.partnerId &&
@@ -91,8 +84,15 @@ export class ShipmentsService {
         dto.customerId && dto.customerId !== existing.customerId?.toString();
       const partnerChanged =
         dto.partnerId && dto.partnerId !== existing.partnerId?.toString();
+      const partnerCustomerChanged =
+        dto.partnerCustomerId &&
+        dto.partnerCustomerId !== existing.partnerCustomerId?.toString();
 
-      const hasChanges = statusChanged || customerChanged || partnerChanged;
+      const hasChanges =
+        statusChanged ||
+        customerChanged ||
+        partnerChanged ||
+        partnerCustomerChanged;
 
       if (!hasChanges) {
         return existing;
@@ -100,15 +100,19 @@ export class ShipmentsService {
 
       // Update fields if provided
       if (statusChanged) {
-        existing.status = dto.status!; // Safe because statusChanged checks dto.status exists
+        existing.status = dto.status!;
       }
-      // Only allow adding customerId if not already assigned and no partnerId conflict
-      if (dto.customerId && !existing.customerId && !existing.partnerId) {
+      // Allow adding customerId if not already assigned
+      if (dto.customerId && !existing.customerId) {
         existing.customerId = dto.customerId;
       }
-      // Only allow adding partnerId if not already assigned and no customerId conflict
-      if (dto.partnerId && !existing.partnerId && !existing.customerId) {
+      // Allow adding partnerId if not already assigned
+      if (dto.partnerId && !existing.partnerId) {
         existing.partnerId = dto.partnerId;
+      }
+      // Allow setting/updating partnerCustomerId
+      if (dto.partnerCustomerId) {
+        existing.partnerCustomerId = dto.partnerCustomerId;
       }
 
       const updated = await existing.save();
@@ -185,6 +189,7 @@ export class ShipmentsService {
       .sort({ createdAt: -1 })
       .populate('customerId', 'name phone email location')
       .populate('partnerId', 'name phone email')
+      .populate('partnerCustomerId', 'name phone email location')
       .populate('containerId', 'containerNumber')
       .exec();
     //  console.log(shipments);
@@ -199,6 +204,7 @@ export class ShipmentsService {
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name phone email location')
       .populate('partnerId', 'name phone email')
+      .populate('partnerCustomerId', 'name phone email location')
       .populate('containerId', 'containerNumber')
       .exec();
     if (!found) throw new NotFoundException('Shipment not found');
@@ -221,15 +227,7 @@ export class ShipmentsService {
       throw new NotFoundException('Shipment not found');
     }
 
-    // Prevent assigning both customerId and partnerId
-    if (dto.customerId && dto.partnerId) {
-      throw new BadRequestException(
-        'Shipment cannot be assigned to both a customer and a partner',
-      );
-    }
-
     const updateData = { ...dto };
-    // console.log(updateData);
     const statusChanging =
       'status' in updateData &&
       updateData.status &&
@@ -245,52 +243,36 @@ export class ShipmentsService {
           'Cannot change partner assignment once a shipment is assigned to a partner',
         );
       }
-      // Partners can assign customers to their shipments
+      // Partners can only modify their own shipments
       if (
         userRole === 'partner' &&
         userId !== existingShipment.partnerId.toString()
       ) {
-        // Partner can only modify their own shipments
         throw new BadRequestException(
           'You can only modify shipments assigned to you',
         );
       }
-      // Admin cannot change customerId if shipment is assigned to a partner
-      // Only block if customerId is actually being changed/assigned
-      if (
-        userRole !== 'partner' &&
-        'customerId' in updateData &&
-        updateData.customerId !== undefined &&
-        updateData.customerId !== null &&
-        updateData.customerId !== existingShipment.customerId?.toString()
-      ) {
-        throw new BadRequestException(
-          'Cannot assign customer to a shipment that is already assigned to a partner. Partner must assign the customer.',
-        );
-      }
     }
 
-    // Prevent changing existing customerId assignment
+    // Prevent changing existing customerId assignment (admin's customer)
     if (existingShipment.customerId) {
       if (
         'customerId' in updateData &&
+        updateData.customerId &&
         updateData.customerId !== existingShipment.customerId.toString()
       ) {
         throw new BadRequestException(
           'Cannot change customer assignment once a shipment is assigned to a customer',
         );
       }
-      // Prevent assigning partnerId if customerId exists
-      if ('partnerId' in updateData && updateData.partnerId) {
-        throw new BadRequestException(
-          'Cannot assign partner to a shipment that is already assigned to a customer',
-        );
-      }
     }
 
-    // If user is a partner, prevent them from changing partnerId
-    if (userRole === 'partner' && 'partnerId' in updateData) {
+    // If user is a partner, they can only modify partnerCustomerId, not customerId or partnerId
+    if (userRole === 'partner') {
       delete updateData.partnerId;
+      delete updateData.customerId;
+      // Partners can only set partnerCustomerId - no additional validation needed
+      // The partnerCustomerId should be one of their own customers (enforced at controller level if needed)
     }
 
     const updated = await this.shipmentModel

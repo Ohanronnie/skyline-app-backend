@@ -46,4 +46,8 @@ export class CreateContainerDto {
   @IsOptional()
   @IsMongoId()
   partnerId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  partnerCustomerId?: string;
 }

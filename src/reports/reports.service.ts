@@ -192,6 +192,7 @@ export class ReportsService {
       .find(query)
       .populate('customerId', 'name phone email location')
       .populate('partnerId', 'name phoneNumber')
+      .populate('partnerCustomerId', 'name phone email location')
       .populate('containerId', 'containerNumber')
       .sort({ createdAt: -1 })
       .exec();
@@ -303,6 +304,8 @@ export class ReportsService {
         'Customer Location',
         'Partner Name',
         'Partner Phone',
+        'Partner Customer Name',
+        'Partner Customer Phone',
         'Container Number',
         'Description',
         'Received At',
@@ -311,6 +314,7 @@ export class ReportsService {
       for (const s of shipments) {
         const c: any = s.customerId;
         const p: any = s.partnerId;
+        const pc: any = (s as any).partnerCustomerId;
         const cont: any = s.containerId;
         sheet.addRow([
           s.trackingNumber,
@@ -323,6 +327,8 @@ export class ReportsService {
           c?.location ?? '',
           p?.name ?? '',
           p?.phoneNumber ?? '',
+          pc?.name ?? '',
+          pc?.phone ?? '',
           cont?.containerNumber ?? '',
           s.description ?? '',
           s.receivedAt ? s.receivedAt.toISOString() : '',

@@ -59,6 +59,9 @@ export class Container {
 
   @Prop({ type: Types.ObjectId, ref: 'Partner', required: false, index: true })
   partnerId?: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
+  partnerCustomerId?: string;
 }
 
 export const ContainerSchema = SchemaFactory.createForClass(Container);

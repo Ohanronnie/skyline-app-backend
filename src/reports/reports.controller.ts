@@ -55,6 +55,7 @@ export class ReportsController {
         ...statusArray,
       ] as any;
     }
+    console.log(dto);
 
     const buffer = await this.reportsService.exportExcel(dto, organization);
     res.setHeader(
