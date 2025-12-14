@@ -19,6 +19,9 @@ export enum ShipmentStatus {
   DISPATCHED_KUMASI = 'dispatched_kumasi',
   RECEIVED_KUMASI = 'received_kumasi',
   DELIVERED_KUMASI = 'delivered_kumasi',
+  DISPATCHED_NKORANZA = 'dispatched_nkoranza',
+  RECEIVED_NKORANZA = 'received_nkoranza',
+  DELIVERED_NKORANZA = 'delivered_nkoranza',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false } })

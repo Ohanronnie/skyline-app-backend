@@ -168,6 +168,7 @@ export class BootstrapService implements OnModuleInit {
           ShipmentStatus.ARRIVED_GHANA,
           ShipmentStatus.RECEIVED_ACCRA,
           ShipmentStatus.RECEIVED_KUMASI,
+          ShipmentStatus.RECEIVED_NKORANZA,
         ],
       },
       {
@@ -175,7 +176,10 @@ export class BootstrapService implements OnModuleInit {
         title: 'Out for Delivery',
         content:
           'Hello {{customerName}}, your goods are out for delivery. Tracking: {{trackingNumber}}. {{companyName}}',
-        statusMapping: [ShipmentStatus.DISPATCHED_KUMASI],
+        statusMapping: [
+          ShipmentStatus.DISPATCHED_KUMASI,
+          ShipmentStatus.DISPATCHED_NKORANZA,
+        ],
       },
     ];
 
