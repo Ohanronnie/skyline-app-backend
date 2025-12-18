@@ -72,12 +72,14 @@ export class ContainersService {
         })
         .populate('customerId', 'name email phone location type')
         .populate('partnerCustomerId', 'name email phone location type')
+        .sort({ createdAt: -1 })
         .exec();
     } else {
       containers = await this.containerModel
         .find(buildOrganizationFilter(organization))
         .populate('customerId', 'name email phone location type')
         .populate('partnerCustomerId', 'name email phone location type')
+        .sort({ createdAt: -1 })
         .exec();
     }
 
