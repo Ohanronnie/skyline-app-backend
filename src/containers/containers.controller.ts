@@ -42,6 +42,7 @@ export class ContainersController {
       return containers.map((container: any) => {
         // Partners only see their own customer, not admin's customer
         container.customerId = container.partnerCustomerId || undefined;
+        container.customerIds = container.partnerCustomerId ? [container.partnerCustomerId] : [];
         return container;
       });
     }
@@ -76,6 +77,7 @@ export class ContainersController {
     if (isPartner) {
       // Partners only see their own customer, not admin's customer
       container.customerId = container.partnerCustomerId || undefined;
+      container.customerIds = container.partnerCustomerId ? [container.partnerCustomerId] : [];
     }
 
     return container;
@@ -128,7 +130,7 @@ export class ContainersController {
     const userRole = user.isPartner ? 'partner' : user.role;
     return this.containersService.assignCustomer(
       id,
-      dto.customerId || null,
+      dto,
       organization,
       userRole,
       user.userId,

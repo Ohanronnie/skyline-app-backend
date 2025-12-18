@@ -50,4 +50,13 @@ export class UpdateContainerDto {
   @IsOptional()
   @IsMongoId()
   partnerCustomerId?: string;
+
+  // New array field for multiple customers (Admin/Skyline use)
+  @IsOptional()
+  @IsMongoId({ each: true })
+  customerIds?: string[];
+
+  @IsOptional()
+  @IsMongoId({ each: true })
+  partnerIds?: string[];
 }

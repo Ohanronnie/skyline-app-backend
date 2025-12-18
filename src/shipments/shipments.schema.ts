@@ -46,6 +46,24 @@ export class Shipment {
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
   partnerCustomerId?: string;
 
+  // Array fields for multiple customers/partners (backward compatible)
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
+  customerIds?: string[];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Partner' }], default: [] })
+  partnerIds?: string[];
+
+  // Structured mapping for partner-specific customers
+  @Prop({
+    type: [{
+      partnerId: { type: Types.ObjectId, ref: 'Partner' },
+      customerId: { type: Types.ObjectId, ref: 'Customer' }
+    }],
+    default: [],
+    _id: false
+  })
+  partnerAssignments: Array<{ partnerId: string; customerId: string }>;
+
   @Prop()
   description?: string;
 

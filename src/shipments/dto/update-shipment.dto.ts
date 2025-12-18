@@ -23,6 +23,15 @@ export class UpdateShipmentDto {
   @IsMongoId()
   partnerCustomerId?: string;
 
+  // Array fields for multiple customers/partners
+  @IsOptional()
+  @IsMongoId({ each: true })
+  customerIds?: string[];
+
+  @IsOptional()
+  @IsMongoId({ each: true })
+  partnerIds?: string[];
+
   @IsOptional()
   @IsString()
   description?: string;

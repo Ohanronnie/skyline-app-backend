@@ -63,6 +63,25 @@ export class Container {
 
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
   partnerCustomerId?: string;
+
+  // New array field for multiple customers (Admin/Skyline use)
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
+  customerIds?: string[];
+
+  // New array field for multiple partners
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Partner' }], default: [] })
+  partnerIds?: string[];
+
+  // Structured mapping for partner-specific customers
+  @Prop({
+    type: [{
+      partnerId: { type: Types.ObjectId, ref: 'Partner' },
+      customerId: { type: Types.ObjectId, ref: 'Customer' }
+    }],
+    default: [],
+    _id: false
+  })
+  partnerAssignments: Array<{ partnerId: string; customerId: string }>;
 }
 
 export const ContainerSchema = SchemaFactory.createForClass(Container);

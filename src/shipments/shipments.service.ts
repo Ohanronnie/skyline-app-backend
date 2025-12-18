@@ -137,10 +137,29 @@ export class ShipmentsService {
       return updated;
     }
 
+    // Merge single + array fields for backward compatibility
+    const customerIds = this.mergeIds(dto.customerId, dto.customerIds);
+    const partnerIds = this.mergeIds(dto.partnerId, dto.partnerIds);
+
+    // Initialize partnerAssignments if partnerId and partnerCustomerId provided
+    const partnerAssignments: Array<{ partnerId: string; customerId: string }> = [];
+    if (dto.partnerId && dto.partnerCustomerId) {
+      partnerAssignments.push({
+        partnerId: dto.partnerId,
+        customerId: dto.partnerCustomerId
+      });
+    }
+
     const doc = new this.shipmentModel({
       ...dto,
       status: statusToPersist,
       organization,
+      customerIds,
+      partnerIds,
+      partnerAssignments,
+      // Store first ID in legacy fields for backward compat
+      customerId: customerIds[0] || null,
+      partnerId: partnerIds[0] || null,
     });
 
     const saved = await doc.save();
@@ -188,8 +207,12 @@ export class ShipmentsService {
       .find(baseFilter)
       .sort({ createdAt: -1 })
       .populate('customerId', 'name phone email location')
+      .populate('customerIds', 'name phone email location')
       .populate('partnerId', 'name phone email')
+      .populate('partnerIds', 'name phone email')
       .populate('partnerCustomerId', 'name phone email location')
+      .populate('partnerAssignments.partnerId', 'name phone email')
+      .populate('partnerAssignments.customerId', 'name phone email location')
       .populate('containerId', 'containerNumber')
       .exec();
     //  console.log(shipments);
@@ -203,8 +226,12 @@ export class ShipmentsService {
     const found = await this.shipmentModel
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
       .populate('customerId', 'name phone email location')
+      .populate('customerIds', 'name phone email location')
       .populate('partnerId', 'name phone email')
+      .populate('partnerIds', 'name phone email')
       .populate('partnerCustomerId', 'name phone email location')
+      .populate('partnerAssignments.partnerId', 'name phone email')
+      .populate('partnerAssignments.customerId', 'name phone email location')
       .populate('containerId', 'containerNumber')
       .exec();
     if (!found) throw new NotFoundException('Shipment not found');
@@ -218,6 +245,13 @@ export class ShipmentsService {
     userRole?: string,
     userId?: string,
   ): Promise<ShipmentDocument> {
+    console.log('[SHIPMENT UPDATE DEBUG] Update called with:', {
+      id,
+      dto,
+      userRole,
+      userId
+    });
+    
     // First, fetch the existing shipment to check partnerId
     const existingShipment = await this.shipmentModel
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
@@ -227,11 +261,38 @@ export class ShipmentsService {
       throw new NotFoundException('Shipment not found');
     }
 
-    const updateData = { ...dto };
-    const statusChanging =
-      'status' in updateData &&
-      updateData.status &&
-      updateData.status !== existingShipment.status;
+    // Merge single + array fields for backward compatibility
+    const customerIds = this.mergeIds(dto.customerId, dto.customerIds);
+    const partnerIds = this.mergeIds(dto.partnerId, dto.partnerIds);
+
+    const updateData: any = { ...dto };
+
+    if (customerIds.length > 0) {
+      updateData.customerIds = customerIds;
+      updateData.customerId = customerIds[0];
+    }
+
+    if (partnerIds.length > 0) {
+      updateData.partnerIds = partnerIds;
+      updateData.partnerId = partnerIds[0];
+    }
+
+    // Sync partnerAssignments if partnerId and partnerCustomerId provided
+    if (dto.partnerId && dto.partnerCustomerId) {
+      const assignments = existingShipment.partnerAssignments || [];
+      const idx = assignments.findIndex(a => a.partnerId === dto.partnerId);
+      
+      if (idx > -1) {
+        assignments[idx].customerId = dto.partnerCustomerId;
+      } else {
+        assignments.push({
+          partnerId: dto.partnerId,
+          customerId: dto.partnerCustomerId
+        });
+      }
+      
+      updateData.partnerAssignments = assignments;
+    }
 
     // Prevent changing existing partnerId assignment
     if (existingShipment.partnerId) {
@@ -254,8 +315,8 @@ export class ShipmentsService {
       }
     }
 
-    // Prevent changing existing customerId assignment (admin's customer)
-    if (existingShipment.customerId) {
+    // Prevent changing existing customerId assignment (admin's customer) - only for admins
+    if (userRole !== 'partner' && existingShipment.customerId) {
       if (
         'customerId' in updateData &&
         updateData.customerId &&
@@ -267,12 +328,60 @@ export class ShipmentsService {
       }
     }
 
-    // If user is a partner, they can only modify partnerCustomerId, not customerId or partnerId
-    if (userRole === 'partner') {
+    const statusChanging =
+      'status' in updateData &&
+      updateData.status &&
+      updateData.status !== existingShipment.status;
+
+    // If user is a partner, manage their partnerAssignments instead of main fields
+    if (userRole === 'partner' && userId) {
+      // Partners may send customerId instead of partnerCustomerId
+      const customerIdToUse = dto.partnerCustomerId || dto.customerId;
+      
+      console.log('[PARTNER ASSIGNMENT DEBUG] Partner update detected', {
+        partnerId: userId,
+        partnerCustomerId: dto.partnerCustomerId,
+        customerId: dto.customerId,
+        customerIdToUse,
+        existingAssignments: existingShipment.partnerAssignments
+      });
+      
+      // Partner managing their specific assignment
+      const assignments = existingShipment.partnerAssignments || [];
+      const idx = assignments.findIndex(a => a.partnerId === userId);
+      
+      console.log('[PARTNER ASSIGNMENT DEBUG] Found index:', idx);
+      
+      if (customerIdToUse) {
+        if (idx > -1) {
+          console.log('[PARTNER ASSIGNMENT DEBUG] Updating existing assignment at index', idx);
+          assignments[idx].customerId = customerIdToUse;
+        } else {
+          console.log('[PARTNER ASSIGNMENT DEBUG] Creating new assignment');
+          assignments.push({ partnerId: userId, customerId: customerIdToUse });
+        }
+        updateData.partnerAssignments = assignments;
+        updateData.partnerCustomerId = customerIdToUse; // Also update legacy field
+        
+        console.log('[PARTNER ASSIGNMENT DEBUG] Final assignments array:', assignments);
+      } else if (idx > -1 && ('partnerCustomerId' in dto || 'customerId' in dto) && !customerIdToUse) {
+        // Remove assignment if explicitly set to null/undefined
+        console.log('[PARTNER ASSIGNMENT DEBUG] Removing assignment at index', idx);
+        assignments.splice(idx, 1);
+        updateData.partnerAssignments = assignments;
+        updateData.partnerCustomerId = null;
+      }
+      
+      // Partners cannot modify admin's fields
       delete updateData.partnerId;
       delete updateData.customerId;
-      // Partners can only set partnerCustomerId - no additional validation needed
-      // The partnerCustomerId should be one of their own customers (enforced at controller level if needed)
+      delete updateData.customerIds;
+      delete updateData.partnerIds;
+      
+      console.log('[PARTNER ASSIGNMENT DEBUG] Update data after deletions:', {
+        partnerAssignments: updateData.partnerAssignments,
+        partnerCustomerId: updateData.partnerCustomerId
+      });
     }
 
     const updated = await this.shipmentModel
@@ -327,5 +436,13 @@ export class ShipmentsService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Shipment not found');
     }
+  }
+
+  // Helper method to merge single ID and array of IDs
+  private mergeIds(single?: string, array?: string[]): string[] {
+    const ids = new Set<string>();
+    if (single) ids.add(single);
+    if (array) array.forEach(id => ids.add(id));
+    return Array.from(ids);
   }
 }
