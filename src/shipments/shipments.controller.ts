@@ -19,6 +19,8 @@ import { LocationFilterService } from '../auth/location-filter.service';
 import type { UserContext } from '../auth/location-filter.service';
 import { Organization } from '../user/users.schema';
 
+import { PaginationDto } from '../common/dto/pagination.dto';
+
 @UseGuards(JwtAuthGuard)
 @Controller('shipments')
 export class ShipmentsController {
@@ -31,6 +33,7 @@ export class ShipmentsController {
   async findAll(
     @CurrentOrganization() organization: Organization,
     @CurrentUser() user: any,
+    @Query() pagination: PaginationDto,
   ) {
     // Location-based filtering
     const warehouseIds =
@@ -40,24 +43,47 @@ export class ShipmentsController {
     const partnerId = isPartner ? user.userId : undefined;
     const customerId =
       user.isCustomer || user.role === 'customer' ? user.userId : undefined;
-    const shipments = await this.shipmentsService.findAll(
+    const {
+      data: shipments,
+      total,
+      page,
+      limit,
+    } = await this.shipmentsService.findAll(
       organization,
       warehouseIds,
       partnerId,
       customerId,
+      pagination.paginated ? pagination.page : 1,
+      pagination.paginated ? pagination.limit : 1000000,
     );
 
     // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    let transformedData = shipments;
     if (isPartner) {
-      return shipments.map((shipment) => {
+      transformedData = shipments.map((shipment) => {
         const s = shipment.toObject();
         // Partners only see their own customer, not admin's customer
         s.customerId = s.partnerCustomerId || undefined;
         return s;
-      });
+      }) as any;
     }
 
-    return shipments;
+    if (!pagination.paginated) {
+      return transformedData;
+    }
+
+    return {
+      data: transformedData,
+      total,
+      page,
+      limit,
+      lastPage: Math.ceil(total / limit),
+    };
+  }
+
+  @Get('tracking-summary')
+  async getTrackingSummary(@CurrentOrganization() organization: Organization) {
+    return this.shipmentsService.getTrackingSummary(organization);
   }
 
   @Post()
@@ -76,9 +102,27 @@ export class ShipmentsController {
   @Get('search')
   async search(
     @Query('q') q: string,
+    @Query() pagination: PaginationDto,
     @CurrentOrganization() organization: Organization,
   ) {
-    return this.shipmentsService.search(q ?? '', organization);
+    const { data, total, page, limit } = await this.shipmentsService.search(
+      q ?? '',
+      organization,
+      pagination.paginated ? pagination.page : 1,
+      pagination.paginated ? pagination.limit : 1000000,
+    );
+
+    if (!pagination.paginated) {
+      return data;
+    }
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      lastPage: Math.ceil(total / limit),
+    };
   }
 
   @Get(':id')

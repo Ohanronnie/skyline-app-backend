@@ -142,11 +142,12 @@ export class ShipmentsService {
     const partnerIds = this.mergeIds(dto.partnerId, dto.partnerIds);
 
     // Initialize partnerAssignments if partnerId and partnerCustomerId provided
-    const partnerAssignments: Array<{ partnerId: string; customerId: string }> = [];
+    const partnerAssignments: Array<{ partnerId: string; customerId: string }> =
+      [];
     if (dto.partnerId && dto.partnerCustomerId) {
       partnerAssignments.push({
         partnerId: dto.partnerId,
-        customerId: dto.partnerCustomerId
+        customerId: dto.partnerCustomerId,
       });
     }
 
@@ -180,7 +181,14 @@ export class ShipmentsService {
     warehouseIds?: string[],
     partnerId?: string,
     customerId?: string,
-  ): Promise<ShipmentDocument[]> {
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    data: ShipmentDocument[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const baseFilter: FilterQuery<ShipmentDocument> = {
       ...buildOrganizationFilter(organization),
     };
@@ -191,32 +199,43 @@ export class ShipmentsService {
       baseFilter.customerId = customerId;
     }
 
-    //console.log(baseFilter, warehouseIds);
+    const skip = (page - 1) * limit;
+
+    let filter = baseFilter;
     if (false && warehouseIds && warehouseIds!.length > 0) {
-      return this.shipmentModel
-        .find({
-          ...baseFilter,
-          $or: [
-            { originWarehouseId: { $in: warehouseIds } },
-            { currentWarehouseId: { $in: warehouseIds } },
-          ],
-        })
-        .exec();
+      filter = {
+        ...baseFilter,
+        $or: [
+          { originWarehouseId: { $in: warehouseIds } },
+          { currentWarehouseId: { $in: warehouseIds } },
+        ],
+      };
     }
-    const shipments = await this.shipmentModel
-      .find(baseFilter)
-      .sort({ createdAt: -1 })
-      .populate('customerId', 'name phone email location')
-      .populate('customerIds', 'name phone email location')
-      .populate('partnerId', 'name phone email')
-      .populate('partnerIds', 'name phone email')
-      .populate('partnerCustomerId', 'name phone email location')
-      .populate('partnerAssignments.partnerId', 'name phone email')
-      .populate('partnerAssignments.customerId', 'name phone email location')
-      .populate('containerId', 'containerNumber')
-      .exec();
-    //  console.log(shipments);
-    return shipments;
+
+    const [shipments, total] = await Promise.all([
+      this.shipmentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('customerId', 'name phone email location')
+        .populate('customerIds', 'name phone email location')
+        .populate('partnerId', 'name phone email')
+        .populate('partnerIds', 'name phone email')
+        .populate('partnerCustomerId', 'name phone email location')
+        .populate('partnerAssignments.partnerId', 'name phone email')
+        .populate('partnerAssignments.customerId', 'name phone email location')
+        .populate('containerId', 'containerNumber')
+        .exec(),
+      this.shipmentModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data: shipments,
+      total,
+      page,
+      limit,
+    };
   }
 
   async findOne(
@@ -249,9 +268,9 @@ export class ShipmentsService {
       id,
       dto,
       userRole,
-      userId
+      userId,
     });
-    
+
     // First, fetch the existing shipment to check partnerId
     const existingShipment = await this.shipmentModel
       .findOne({ _id: id, ...buildOrganizationFilter(organization) })
@@ -280,17 +299,17 @@ export class ShipmentsService {
     // Sync partnerAssignments if partnerId and partnerCustomerId provided
     if (dto.partnerId && dto.partnerCustomerId) {
       const assignments = existingShipment.partnerAssignments || [];
-      const idx = assignments.findIndex(a => a.partnerId === dto.partnerId);
-      
+      const idx = assignments.findIndex((a) => a.partnerId === dto.partnerId);
+
       if (idx > -1) {
         assignments[idx].customerId = dto.partnerCustomerId;
       } else {
         assignments.push({
           partnerId: dto.partnerId,
-          customerId: dto.partnerCustomerId
+          customerId: dto.partnerCustomerId,
         });
       }
-      
+
       updateData.partnerAssignments = assignments;
     }
 
@@ -337,24 +356,27 @@ export class ShipmentsService {
     if (userRole === 'partner' && userId) {
       // Partners may send customerId instead of partnerCustomerId
       const customerIdToUse = dto.partnerCustomerId || dto.customerId;
-      
+
       console.log('[PARTNER ASSIGNMENT DEBUG] Partner update detected', {
         partnerId: userId,
         partnerCustomerId: dto.partnerCustomerId,
         customerId: dto.customerId,
         customerIdToUse,
-        existingAssignments: existingShipment.partnerAssignments
+        existingAssignments: existingShipment.partnerAssignments,
       });
-      
+
       // Partner managing their specific assignment
       const assignments = existingShipment.partnerAssignments || [];
-      const idx = assignments.findIndex(a => a.partnerId === userId);
-      
+      const idx = assignments.findIndex((a) => a.partnerId === userId);
+
       console.log('[PARTNER ASSIGNMENT DEBUG] Found index:', idx);
-      
+
       if (customerIdToUse) {
         if (idx > -1) {
-          console.log('[PARTNER ASSIGNMENT DEBUG] Updating existing assignment at index', idx);
+          console.log(
+            '[PARTNER ASSIGNMENT DEBUG] Updating existing assignment at index',
+            idx,
+          );
           assignments[idx].customerId = customerIdToUse;
         } else {
           console.log('[PARTNER ASSIGNMENT DEBUG] Creating new assignment');
@@ -362,25 +384,35 @@ export class ShipmentsService {
         }
         updateData.partnerAssignments = assignments;
         updateData.partnerCustomerId = customerIdToUse; // Also update legacy field
-        
-        console.log('[PARTNER ASSIGNMENT DEBUG] Final assignments array:', assignments);
-      } else if (idx > -1 && ('partnerCustomerId' in dto || 'customerId' in dto) && !customerIdToUse) {
+
+        console.log(
+          '[PARTNER ASSIGNMENT DEBUG] Final assignments array:',
+          assignments,
+        );
+      } else if (
+        idx > -1 &&
+        ('partnerCustomerId' in dto || 'customerId' in dto) &&
+        !customerIdToUse
+      ) {
         // Remove assignment if explicitly set to null/undefined
-        console.log('[PARTNER ASSIGNMENT DEBUG] Removing assignment at index', idx);
+        console.log(
+          '[PARTNER ASSIGNMENT DEBUG] Removing assignment at index',
+          idx,
+        );
         assignments.splice(idx, 1);
         updateData.partnerAssignments = assignments;
         updateData.partnerCustomerId = null;
       }
-      
+
       // Partners cannot modify admin's fields
       delete updateData.partnerId;
       delete updateData.customerId;
       delete updateData.customerIds;
       delete updateData.partnerIds;
-      
+
       console.log('[PARTNER ASSIGNMENT DEBUG] Update data after deletions:', {
         partnerAssignments: updateData.partnerAssignments,
-        partnerCustomerId: updateData.partnerCustomerId
+        partnerCustomerId: updateData.partnerCustomerId,
       });
     }
 
@@ -415,7 +447,14 @@ export class ShipmentsService {
   async search(
     query: string,
     organization: Organization,
-  ): Promise<ShipmentDocument[]> {
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    data: ShipmentDocument[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     // Sanitize input to prevent ReDoS attacks
     const sanitized = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const filter: FilterQuery<ShipmentDocument> = {
@@ -425,7 +464,19 @@ export class ShipmentsService {
         { description: { $regex: sanitized, $options: 'i' } },
       ],
     };
-    return this.shipmentModel.find(filter).exec();
+
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      this.shipmentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.shipmentModel.countDocuments(filter).exec(),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async delete(id: string, organization: Organization): Promise<void> {
@@ -438,11 +489,87 @@ export class ShipmentsService {
     }
   }
 
+  async getTrackingSummary(organization: Organization): Promise<any> {
+    const filter = buildOrganizationFilter(organization);
+
+    const [statsResult, recent] = await Promise.all([
+      this.shipmentModel.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      this.shipmentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('_id trackingNumber status createdAt')
+        .exec(),
+    ]);
+
+    const stats = {
+      inTransit: 0,
+      delivered: 0,
+      pending: 0,
+      atWarehouse: 0,
+    };
+
+    statsResult.forEach((item) => {
+      const status = item._id as ShipmentStatus;
+      const count = item.count;
+
+      if (
+        [
+          ShipmentStatus.IN_TRANSIT,
+          ShipmentStatus.LOADED,
+          ShipmentStatus.LOADED_CHINA,
+          ShipmentStatus.DISPATCHED_KUMASI,
+          ShipmentStatus.DISPATCHED_NKORANZA,
+        ].includes(status)
+      ) {
+        stats.inTransit += count;
+      } else if (
+        [
+          ShipmentStatus.DELIVERED,
+          ShipmentStatus.DELIVERED_ACCRA,
+          ShipmentStatus.DELIVERED_KUMASI,
+          ShipmentStatus.DELIVERED_NKORANZA,
+        ].includes(status)
+      ) {
+        stats.delivered += count;
+      } else if (
+        [ShipmentStatus.RECEIVED, ShipmentStatus.RECEIVED_CHINA].includes(
+          status,
+        )
+      ) {
+        stats.pending += count;
+      } else if (
+        [
+          ShipmentStatus.INSPECTED,
+          ShipmentStatus.ARRIVED_GHANA,
+          ShipmentStatus.RECEIVED_ACCRA,
+          ShipmentStatus.RECEIVED_KUMASI,
+          ShipmentStatus.RECEIVED_NKORANZA,
+        ].includes(status)
+      ) {
+        stats.atWarehouse += count;
+      }
+    });
+
+    return {
+      stats,
+      recent,
+    };
+  }
+
   // Helper method to merge single ID and array of IDs
   private mergeIds(single?: string, array?: string[]): string[] {
     const ids = new Set<string>();
     if (single) ids.add(single);
-    if (array) array.forEach(id => ids.add(id));
+    if (array) array.forEach((id) => ids.add(id));
     return Array.from(ids);
   }
 }

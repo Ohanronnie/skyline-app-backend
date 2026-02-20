@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ContainersService } from './containers.service';
@@ -20,6 +21,8 @@ import { UserRole, Organization } from '../user/users.schema';
 import { CurrentOrganization } from '../auth/organization.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 
+import { PaginationDto } from '../common/dto/pagination.dto';
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('containers')
 export class ContainersController {
@@ -29,25 +32,46 @@ export class ContainersController {
   async findAll(
     @CurrentOrganization() organization: Organization,
     @CurrentUser() user: any,
+    @Query() pagination: PaginationDto,
   ) {
     const isPartner = user.isPartner || user.role === 'partner';
     const partnerId = isPartner ? user.userId : undefined;
-    const containers = await this.containersService.findAll(
+    const {
+      data: containers,
+      total,
+      page,
+      limit,
+    } = await this.containersService.findAll(
       organization,
       partnerId,
+      pagination.paginated ? pagination.page : 1,
+      pagination.paginated ? pagination.limit : 1000000,
     );
 
     // Transform for partners: use partnerCustomerId as customerId for frontend compatibility
+    let transformedData = containers;
     if (isPartner) {
-      return containers.map((container: any) => {
+      transformedData = containers.map((container: any) => {
         // Partners only see their own customer, not admin's customer
         container.customerId = container.partnerCustomerId || undefined;
-        container.customerIds = container.partnerCustomerId ? [container.partnerCustomerId] : [];
+        container.customerIds = container.partnerCustomerId
+          ? [container.partnerCustomerId]
+          : [];
         return container;
       });
     }
 
-    return containers;
+    if (!pagination.paginated) {
+      return transformedData;
+    }
+
+    return {
+      data: transformedData,
+      total,
+      page,
+      limit,
+      lastPage: Math.ceil(total / limit),
+    };
   }
 
   @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
@@ -77,7 +101,9 @@ export class ContainersController {
     if (isPartner) {
       // Partners only see their own customer, not admin's customer
       container.customerId = container.partnerCustomerId || undefined;
-      container.customerIds = container.partnerCustomerId ? [container.partnerCustomerId] : [];
+      container.customerIds = container.partnerCustomerId
+        ? [container.partnerCustomerId]
+        : [];
     }
 
     return container;
@@ -115,8 +141,27 @@ export class ContainersController {
   async listShipments(
     @Param('id') id: string,
     @CurrentOrganization() organization: Organization,
+    @Query() pagination: PaginationDto,
   ) {
-    return this.containersService.listShipments(id, organization);
+    const { data, total, page, limit } =
+      await this.containersService.listShipments(
+        id,
+        organization,
+        pagination.paginated ? pagination.page : 1,
+        pagination.paginated ? pagination.limit : 1000000,
+      );
+
+    if (!pagination.paginated) {
+      return data;
+    }
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      lastPage: Math.ceil(total / limit),
+    };
   }
 
   @Put(':id/assign-customer')

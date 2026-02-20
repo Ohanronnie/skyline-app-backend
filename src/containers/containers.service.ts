@@ -39,11 +39,12 @@ export class ContainersService {
     const partnerIds = this.mergeIds(dto.partnerId, dto.partnerIds);
 
     // Initialize partnerAssignments if partnerId and partnerCustomerId provided
-    const partnerAssignments: Array<{ partnerId: string; customerId: string }> = [];  
+    const partnerAssignments: Array<{ partnerId: string; customerId: string }> =
+      [];
     if (dto.partnerId && dto.partnerCustomerId) {
       partnerAssignments.push({
         partnerId: dto.partnerId,
-        customerId: dto.partnerCustomerId
+        customerId: dto.partnerCustomerId,
       });
     }
 
@@ -63,8 +64,12 @@ export class ContainersService {
   async findAll(
     organization: Organization,
     partnerId?: string,
-  ): Promise<any[]> {
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ data: any[]; total: number; page: number; limit: number }> {
     let containers: ContainerDocument[];
+    let total = 0;
+    const skip = (page - 1) * limit;
 
     if (partnerId) {
       // Find containers that have shipments belonging to this partner
@@ -85,8 +90,15 @@ export class ContainersService {
       ];
 
       if (containerIds.length === 0) {
-        return [];
+        return { data: [], total: 0, page, limit };
       }
+
+      total = await this.containerModel
+        .countDocuments({
+          _id: { $in: containerIds },
+          ...buildOrganizationFilter(organization),
+        })
+        .exec();
 
       containers = await this.containerModel
         .find({
@@ -99,10 +111,18 @@ export class ContainersService {
         .populate('partnerIds', 'name phone email')
         .populate('partnerCustomerId', 'name email phone location type')
         .populate('partnerAssignments.partnerId', 'name phone email')
-        .populate('partnerAssignments.customerId', 'name email phone location type')
+        .populate(
+          'partnerAssignments.customerId',
+          'name email phone location type',
+        )
         .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
         .exec();
     } else {
+      total = await this.containerModel
+        .countDocuments(buildOrganizationFilter(organization))
+        .exec();
       containers = await this.containerModel
         .find(buildOrganizationFilter(organization))
         .populate('customerId', 'name email phone location type')
@@ -111,13 +131,18 @@ export class ContainersService {
         .populate('partnerIds', 'name phone email')
         .populate('partnerCustomerId', 'name email phone location type')
         .populate('partnerAssignments.partnerId', 'name phone email')
-        .populate('partnerAssignments.customerId', 'name email phone location type')
+        .populate(
+          'partnerAssignments.customerId',
+          'name email phone location type',
+        )
         .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
         .exec();
     }
 
     // Get shipments and customers for each container
-    return Promise.all(
+    const data = await Promise.all(
       containers.map(async (container) => {
         // Get shipment count
         const shipmentCount = await this.shipmentModel
@@ -180,8 +205,6 @@ export class ContainersService {
           }
         }
 
-        // shipmentCount already calculated above
-
         // Get customer (usually 1, but could be multiple from shipments or direct assignment)
         const customer = customers.length > 0 ? customers[0] : undefined;
 
@@ -194,6 +217,13 @@ export class ContainersService {
         };
       }),
     );
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+    };
   }
 
   async findOne(id: string, organization: Organization): Promise<any> {
@@ -205,7 +235,10 @@ export class ContainersService {
       .populate('partnerIds', 'name phone email')
       .populate('partnerCustomerId', 'name email phone location type')
       .populate('partnerAssignments.partnerId', 'name phone email')
-      .populate('partnerAssignments.customerId', 'name email phone location type')
+      .populate(
+        'partnerAssignments.customerId',
+        'name email phone location type',
+      )
       .exec();
     if (!container) throw new NotFoundException('Container not found');
 
@@ -343,29 +376,29 @@ export class ContainersService {
     // Sync partnerAssignments if partnerId and partnerCustomerId provided
     if (dto.partnerId && dto.partnerCustomerId) {
       const assignments = existing.partnerAssignments || [];
-      const idx = assignments.findIndex(a => a.partnerId === dto.partnerId);
-      
+      const idx = assignments.findIndex((a) => a.partnerId === dto.partnerId);
+
       if (idx > -1) {
         assignments[idx].customerId = dto.partnerCustomerId;
       } else {
         assignments.push({
           partnerId: dto.partnerId,
-          customerId: dto.partnerCustomerId
+          customerId: dto.partnerCustomerId,
         });
       }
-      
+
       updateData.partnerAssignments = assignments;
     }
-    
+
     // If user is a partner, manage their partnerAssignments instead of main fields
     if (userRole === 'partner' && userId) {
       // Partners may send customerId instead of partnerCustomerId
       const customerIdToUse = dto.partnerCustomerId || dto.customerId;
-      
+
       // Partner managing their specific assignment
       const assignments = existing.partnerAssignments || [];
-      const idx = assignments.findIndex(a => a.partnerId === userId);
-      
+      const idx = assignments.findIndex((a) => a.partnerId === userId);
+
       if (customerIdToUse) {
         if (idx > -1) {
           assignments[idx].customerId = customerIdToUse;
@@ -374,13 +407,17 @@ export class ContainersService {
         }
         updateData.partnerAssignments = assignments;
         updateData.partnerCustomerId = customerIdToUse; // Also update legacy field
-      } else if (idx > -1 && ('partnerCustomerId' in dto || 'customerId' in dto) && !customerIdToUse) {
+      } else if (
+        idx > -1 &&
+        ('partnerCustomerId' in dto || 'customerId' in dto) &&
+        !customerIdToUse
+      ) {
         // Remove assignment if explicitly set to null/undefined
         assignments.splice(idx, 1);
         updateData.partnerAssignments = assignments;
         updateData.partnerCustomerId = null;
       }
-      
+
       // Partners cannot modify admin's fields
       delete updateData.partnerId;
       delete updateData.customerId;
@@ -427,11 +464,32 @@ export class ContainersService {
     return { loadedCount: shipments.length };
   }
 
-  async listShipments(containerId: string, organization: Organization) {
+  async listShipments(
+    containerId: string,
+    organization: Organization,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    data: ShipmentDocument[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     await this.findOne(containerId, organization);
-    return this.shipmentModel
-      .find({ containerId, ...buildOrganizationFilter(organization) })
-      .exec();
+    const filter = { containerId, ...buildOrganizationFilter(organization) };
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.shipmentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.shipmentModel.countDocuments(filter).exec(),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async assignCustomer(
@@ -473,8 +531,8 @@ export class ContainersService {
     if (userRole === 'partner' && userId) {
       // Partner managing their specific assignment
       const assignments = container.partnerAssignments || [];
-      const idx = assignments.findIndex(a => a.partnerId === userId);
-      
+      const idx = assignments.findIndex((a) => a.partnerId === userId);
+
       if (dto.customerId) {
         if (idx > -1) {
           assignments[idx].customerId = dto.customerId;
@@ -484,9 +542,10 @@ export class ContainersService {
       } else if (idx > -1) {
         assignments.splice(idx, 1);
       }
-      
+
       updateQuery.$set.partnerAssignments = assignments;
-      updateQuery.$set.partnerCustomerId = assignments.length > 0 ? assignments[0].customerId : null;
+      updateQuery.$set.partnerCustomerId =
+        assignments.length > 0 ? assignments[0].customerId : null;
     } else {
       // Admin path - simple single assignment
       updateQuery.$set.customerId = dto.customerId || null;
@@ -504,7 +563,10 @@ export class ContainersService {
       .populate('partnerId', 'name phone email')
       .populate('partnerCustomerId', 'name email phone location type')
       .populate('partnerAssignments.partnerId', 'name phone email')
-      .populate('partnerAssignments.customerId', 'name email phone location type')
+      .populate(
+        'partnerAssignments.customerId',
+        'name email phone location type',
+      )
       .exec();
 
     if (!updated) {
@@ -540,7 +602,7 @@ export class ContainersService {
   private mergeIds(single?: string, array?: string[]): string[] {
     const ids = new Set<string>();
     if (single) ids.add(single);
-    if (array) array.forEach(id => ids.add(id));
+    if (array) array.forEach((id) => ids.add(id));
     return Array.from(ids);
   }
 }
