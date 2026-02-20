@@ -74,7 +74,7 @@ export class ContainersController {
     };
   }
 
-  @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
+  //@Roles(UserRole.ADMIN, UserRole.CHINA_STAFF, UserRole.GHANA_STAFF)
   @Post()
   async create(
     @Body() dto: CreateContainerDto,
@@ -127,7 +127,7 @@ export class ContainersController {
     );
   }
 
-  @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF)
+  @Roles(UserRole.ADMIN, UserRole.CHINA_STAFF, UserRole.GHANA_STAFF)
   @Post(':id/load')
   async load(
     @Param('id') id: string,

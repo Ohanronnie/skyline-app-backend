@@ -15,13 +15,13 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('shipments')
-  async shipments() {
-    return this.reportsService.shipmentsAnalytics();
+  async shipments(@CurrentOrganization() organization: Organization) {
+    return this.reportsService.shipmentsAnalytics(organization);
   }
 
   @Get('containers')
-  async containers() {
-    return this.reportsService.containersPerformance();
+  async containers(@CurrentOrganization() organization: Organization) {
+    return this.reportsService.containersPerformance(organization);
   }
 
   @Roles(UserRole.ADMIN)

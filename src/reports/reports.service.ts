@@ -37,17 +37,21 @@ export class ReportsService {
     private readonly partnerModel: Model<PartnerDocument>,
   ) {}
 
-  async shipmentsAnalytics() {
-    const total = await this.shipmentModel.countDocuments();
+  async shipmentsAnalytics(organization: Organization) {
+    const filter = buildOrganizationFilter(organization);
+    const total = await this.shipmentModel.countDocuments(filter);
     const byStatus = await this.shipmentModel.aggregate([
+      { $match: filter },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
     return { total, byStatus };
   }
 
-  async containersPerformance() {
-    const total = await this.containerModel.countDocuments();
+  async containersPerformance(organization: Organization) {
+    const filter = buildOrganizationFilter(organization);
+    const total = await this.containerModel.countDocuments(filter);
     const active = await this.containerModel.countDocuments({
+      ...filter,
       status: {
         $in: [
           ContainerStatus.LOADING,
@@ -57,6 +61,7 @@ export class ReportsService {
       },
     });
     const byStatus = await this.containerModel.aggregate([
+      { $match: filter },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
     return { total, active, byStatus };
@@ -141,13 +146,17 @@ export class ReportsService {
       );
     }
     if (dto.customerId) {
-      query.customerId = (dto.customerId).toString();
+      const targetCustomerId = new Types.ObjectId(dto.customerId);
+      query.$or = [
+        { customerId: targetCustomerId },
+        { partnerCustomerId: targetCustomerId },
+      ];
       this.logger.log(
-        `[exportShipmentsExcel] Filtering by customerId: ${dto.customerId}`,
+        `[exportShipmentsExcel] Filtering by customerId (both fields): ${dto.customerId}`,
       );
     }
     if (dto.containerId) {
-      query.containerId = (dto.containerId).toString();
+      query.containerId = new Types.ObjectId(dto.containerId);
       this.logger.log(
         `[exportShipmentsExcel] Filtering by containerId: ${dto.containerId}`,
       );
@@ -168,7 +177,7 @@ export class ReportsService {
     ) {
       query._id = {
         $in: payload.selectedShipments.map(
-          (id: string) => id.toString(),
+          (id: string) => new Types.ObjectId(id),
         ),
       };
       this.logger.log(
@@ -344,7 +353,11 @@ export class ReportsService {
     dto: GenerateExcelReportDto,
     organization?: Organization,
   ): Promise<Uint8Array> {
-    const query: any = {};
+    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
+    const query: any = { ...orgFilter };
+    if (dto.customerId) {
+      query._id = new Types.ObjectId(dto.customerId);
+    }
     if (dto.customerTypes?.length) {
       query.type = { $in: dto.customerTypes };
     }
@@ -425,7 +438,8 @@ export class ReportsService {
   ): Promise<Uint8Array> {
     const { from, to } = this.parseDateRange(dto);
 
-    const containerQuery: any = {};
+    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
+    const containerQuery: any = { ...orgFilter };
     if (dto.containerId) {
       containerQuery._id = new Types.ObjectId(dto.containerId);
     }
@@ -440,7 +454,19 @@ export class ReportsService {
     let shipmentsByContainer = new Map<string, ShipmentDocument[]>();
     if (dto.mode === ReportMode.DETAILED) {
       const containerIds = containers.map((c) => c._id);
-      const shipmentQuery: any = { containerId: { $in: containerIds } };
+      const shipmentQuery: any = {
+        containerId: { $in: containerIds },
+        ...orgFilter,
+      };
+
+      if (dto.customerId) {
+        const targetCustomerId = new Types.ObjectId(dto.customerId);
+        shipmentQuery.$or = [
+          { customerId: targetCustomerId },
+          { partnerCustomerId: targetCustomerId },
+        ];
+      }
+
       if (from || to) {
         shipmentQuery.receivedAt = {};
         if (from) shipmentQuery.receivedAt.$gte = from;
@@ -467,9 +493,18 @@ export class ReportsService {
       // Summary: one row per container with counts/totals
       sheet.addRow(['Container Number', 'Status', 'Total Shipments']);
       for (const c of containers) {
-        const shipmentsCount = await this.shipmentModel.countDocuments({
+        const filter: any = {
           containerId: c._id,
-        });
+          ...orgFilter,
+        };
+        if (dto.customerId) {
+          const targetCustomerId = new Types.ObjectId(dto.customerId);
+          filter.$or = [
+            { customerId: targetCustomerId },
+            { partnerCustomerId: targetCustomerId },
+          ];
+        }
+        const shipmentsCount = await this.shipmentModel.countDocuments(filter);
         sheet.addRow([c.containerNumber, c.status, shipmentsCount]);
       }
     } else {
