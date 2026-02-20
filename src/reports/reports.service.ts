@@ -403,29 +403,106 @@ export class ReportsService {
         sheet.addRow([loc, count]);
       }
     } else {
-      // Detailed: one row per customer
+      // Per-Customer Detailed Report including Shipments
       sheet.addRow([
-        'Name',
-        'Type',
-        'Location',
-        'Email',
-        'Phone',
-        'Address',
+        'Customer Name',
+        'Customer Type',
+        'Customer Location',
+        'Customer Email',
+        'Customer Phone',
+        'Customer Address',
         'Partner Name',
         'Partner Phone',
+        'Shipment Tracking',
+        'Shipment Status',
+        'Container Number',
+        'CBM',
+        'Quantity',
+        'Total Shipments (Lifetime)',
       ]);
+
+      const customerIds = customers.map((c) => c._id);
+
+      // Fetch all shipments for these customers at once for performance
+      const shipments = await this.shipmentModel
+        .find({
+          ...orgFilter,
+          $or: [
+            { customerId: { $in: customerIds } },
+            { partnerCustomerId: { $in: customerIds } },
+          ],
+        })
+        .populate('containerId', 'containerNumber')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      // Group shipments by customer ID (checking both fields)
+      const shipmentsByCustomer = new Map<string, ShipmentDocument[]>();
+      for (const s of shipments) {
+        const adminId = s.customerId?.toString();
+        const partnerCustId = s.partnerCustomerId?.toString();
+
+        if (adminId) {
+          const list = shipmentsByCustomer.get(adminId) || [];
+          list.push(s);
+          shipmentsByCustomer.set(adminId, list);
+        }
+        if (partnerCustId && partnerCustId !== adminId) {
+          const list = shipmentsByCustomer.get(partnerCustId) || [];
+          list.push(s);
+          shipmentsByCustomer.set(partnerCustId, list);
+        }
+      }
+
       for (const c of customers) {
         const p: any = c.partnerId;
-        sheet.addRow([
-          c.name,
-          c.type,
-          c.location,
-          c.email ?? '',
-          c.phone ?? '',
-          c.address ?? '',
-          p?.name ?? '',
-          p?.phoneNumber ?? '',
-        ]);
+        const customerShipments =
+          shipmentsByCustomer.get(c._id.toString()) || [];
+
+        if (dto.onlyWithShipments && customerShipments.length === 0) {
+          continue;
+        }
+
+        if (customerShipments.length === 0) {
+          // Row for customer with no shipments
+          sheet.addRow([
+            c.name,
+            c.type,
+            c.location,
+            c.email ?? '',
+            c.phone ?? '',
+            c.address ?? '',
+            p?.name ?? '',
+            p?.phoneNumber ?? '',
+            'N/A',
+            'N/A',
+            'N/A',
+            0,
+            0,
+            0,
+          ]);
+        } else {
+          // Multiple rows: one for each shipment
+          for (const s of customerShipments) {
+            const cont: any = s.containerId;
+            sheet.addRow([
+              c.name,
+              c.type,
+              c.location,
+              c.email ?? '',
+              c.phone ?? '',
+              c.address ?? '',
+              p?.name ?? '',
+              p?.phoneNumber ?? '',
+              s.trackingNumber,
+              s.status,
+              cont?.containerNumber ?? 'Not Loaded',
+              s.cbm ?? 0,
+              s.quantity ?? 0,
+              customerShipments.length,
+            ]);
+          }
+        }
       }
     }
 
