@@ -1,4 +1,11 @@
-import { Controller, Post, Get, UseGuards, Body } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  UseGuards,
+  Body,
+  NotFoundException,
+} from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -48,6 +55,9 @@ export class PaymentsController {
 
   @Post('webhook')
   async handleWebhook(@Body() body: any) {
+    if (!this.paymentsService.isPaymentsGatewayEnabled()) {
+      throw new NotFoundException();
+    }
     // Hubtel webhook callback
     // Expected body structure from Hubtel (adjust based on actual webhook format)
     const { clientReference, status, ...hubtelData } = body;

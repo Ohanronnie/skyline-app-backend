@@ -20,13 +20,21 @@ import { ConfigModule } from '../config/config.module';
     {
       provide: 'HUBTEL_HTTP_CLIENT',
       inject: [ConfigService],
-      useFactory: (configService: ConfigService): AxiosInstance => {
+      useFactory: (
+        configService: ConfigService,
+      ): AxiosInstance | undefined => {
+        const enabled =
+          configService.get<string>('ENABLE_PAYMENTS_GATEWAY') === 'true';
+        if (!enabled) {
+          return undefined;
+        }
+
         const apiId = configService.get<string>('HUBTEL_API_ID');
         const apiKey = configService.get<string>('HUBTEL_API_KEY');
 
         if (!apiId || !apiKey) {
           throw new Error(
-            'HUBTEL_API_ID and HUBTEL_API_KEY must be set in environment variables',
+            'HUBTEL_API_ID and HUBTEL_API_KEY must be set when ENABLE_PAYMENTS_GATEWAY=true',
           );
         }
 

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -20,8 +21,9 @@ import { PartnersService } from '../partners/partners.service';
 @Injectable()
 export class PaymentsService {
   constructor(
+    @Optional()
     @Inject('HUBTEL_HTTP_CLIENT')
-    private readonly hubtelClient: AxiosInstance,
+    private readonly hubtelClient: AxiosInstance | undefined,
     private readonly configService: ConfigService,
     @InjectModel(Payment.name)
     private readonly paymentModel: Model<PaymentDocument>,
@@ -31,7 +33,14 @@ export class PaymentsService {
   /**
    * Simple health check to verify Hubtel client configuration.
    */
+  isPaymentsGatewayEnabled(): boolean {
+    return !!this.hubtelClient;
+  }
+
   async pingHubtel(): Promise<boolean> {
+    if (!this.hubtelClient) {
+      return false;
+    }
     try {
       await this.hubtelClient.get('/');
       return true;
@@ -49,6 +58,9 @@ export class PaymentsService {
     clientReference: string;
     checkoutDirectUrl?: string;
   }> {
+    if (!this.hubtelClient) {
+      throw new NotFoundException();
+    }
     try {
       // Verify partner exists
       const partner = await this.partnersService.findById(partnerId);
@@ -232,6 +244,9 @@ export class PaymentsService {
     clientReference: string;
     checkoutDirectUrl?: string;
   }> {
+    if (!this.hubtelClient) {
+      throw new NotFoundException();
+    }
     try {
       // Verify partner exists
       const partner = await this.partnersService.findById(partnerId);

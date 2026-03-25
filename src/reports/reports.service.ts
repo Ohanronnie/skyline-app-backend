@@ -119,31 +119,30 @@ export class ReportsService {
     return { from, to };
   }
 
+  private buildDateQuery(
+    dto: GenerateExcelReportDto,
+    field: string = 'createdAt',
+  ) {
+    const { from, to } = this.parseDateRange(dto);
+    if (!from && !to) return {};
+    const query: any = {};
+    query[field] = {};
+    if (from) query[field].$gte = from;
+    if (to) query[field].$lte = to;
+    return query;
+  }
+
   private async exportShipmentsExcel(
     dto: GenerateExcelReportDto,
     organization?: Organization,
   ): Promise<Uint8Array> {
     this.logger.log(`[exportShipmentsExcel] Starting - mode: ${dto.mode}`);
-    this.logger.log(
-      `[exportShipmentsExcel] Full DTO: ${JSON.stringify(dto, null, 2)}`,
-    );
 
-    const { from, to } = this.parseDateRange(dto);
-    this.logger.log(
-      `[exportShipmentsExcel] Date range - from: ${from}, to: ${to}`,
-    );
+    const dateQuery = this.buildDateQuery(dto, 'createdAt');
+    const query: any = { ...dateQuery };
 
-    const query: any = {};
-    if (from || to) {
-      query.receivedAt = {};
-      if (from) query.receivedAt.$gte = from;
-      if (to) query.receivedAt.$lte = to;
-    }
     if (dto.partnerId) {
       query.partnerId = new Types.ObjectId(dto.partnerId);
-      this.logger.log(
-        `[exportShipmentsExcel] Filtering by partnerId: ${dto.partnerId}`,
-      );
     }
     if (dto.customerId) {
       const targetCustomerId = new Types.ObjectId(dto.customerId);
@@ -151,51 +150,26 @@ export class ReportsService {
         { customerId: targetCustomerId },
         { partnerCustomerId: targetCustomerId },
       ];
-      this.logger.log(
-        `[exportShipmentsExcel] Filtering by customerId (both fields): ${dto.customerId}`,
-      );
     }
     if (dto.containerId) {
       query.containerId = new Types.ObjectId(dto.containerId);
-      this.logger.log(
-        `[exportShipmentsExcel] Filtering by containerId: ${dto.containerId}`,
-      );
     }
     if (dto.shipmentStatuses?.length) {
       query.status = { $in: dto.shipmentStatuses };
-      this.logger.log(
-        `[exportShipmentsExcel] Filtering by statuses: ${dto.shipmentStatuses.join(', ')}`,
-      );
     }
 
-    // Handle selectedShipments if provided (from frontend payload)
     const payload = (dto as any).payload;
-    if (
-      payload?.selectedShipments &&
-      Array.isArray(payload.selectedShipments) &&
-      payload.selectedShipments.length > 0
-    ) {
+    if (payload?.selectedShipments?.length) {
       query._id = {
         $in: payload.selectedShipments.map(
           (id: string) => new Types.ObjectId(id),
         ),
       };
-      this.logger.log(
-        `[exportShipmentsExcel] Filtering by selectedShipments: ${payload.selectedShipments.length} shipments`,
-      );
     }
 
-    // Apply organization filter if provided
     if (organization) {
       Object.assign(query, buildOrganizationFilter(organization));
-      this.logger.log(
-        `[exportShipmentsExcel] Applied organization filter: ${organization}`,
-      );
     }
-
-    this.logger.log(
-      `[exportShipmentsExcel] Final query: ${JSON.stringify(query, null, 2)}`,
-    );
 
     const shipments = await this.shipmentModel
       .find(query)
@@ -206,31 +180,10 @@ export class ReportsService {
       .sort({ createdAt: -1 })
       .exec();
 
-    this.logger.log(
-      `[exportShipmentsExcel] Found ${shipments.length} shipments`,
-    );
-    if (shipments.length === 0) {
-      this.logger.warn(
-        `[exportShipmentsExcel] No shipments found with query: ${JSON.stringify(query)}`,
-      );
-    } else {
-      this.logger.log(
-        `[exportShipmentsExcel] Sample shipment IDs: ${shipments
-          .slice(0, 3)
-          .map((s) => s._id.toString())
-          .join(', ')}`,
-      );
-    }
-
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Shipments');
 
-    this.logger.log(
-      `[exportShipmentsExcel] Creating Excel workbook - mode: ${dto.mode}`,
-    );
-
     if (dto.mode === ReportMode.SUMMARY) {
-      // Summary: totals and per customer/per partner
       const totalShipments = shipments.length;
       const totalCbm = shipments.reduce((sum, s) => sum + (s.cbm || 0), 0);
       const totalQuantity = shipments.reduce(
@@ -238,17 +191,12 @@ export class ReportsService {
         0,
       );
 
-      this.logger.log(
-        `[exportShipmentsExcel] Summary totals - shipments: ${totalShipments}, CBM: ${totalCbm}, Qty: ${totalQuantity}`,
-      );
-
       sheet.addRow(['Summary']);
       sheet.addRow(['Total Shipments', totalShipments]);
-      sheet.addRow(['Total CBM', totalCbm]);
+      sheet.addRow(['Total CBM', totalCbm.toFixed(3)]);
       sheet.addRow(['Total Quantity', totalQuantity]);
       sheet.addRow([]);
 
-      // Per customer
       sheet.addRow(['Per Customer']);
       sheet.addRow(['Customer Name', 'Shipments', 'Total CBM', 'Total Qty']);
       const byCustomer = new Map<
@@ -256,52 +204,29 @@ export class ReportsService {
         { name: string; count: number; cbm: number; qty: number }
       >();
       for (const s of shipments) {
-        const c: any = s.customerId;
+        const c: any = s.customerId || (s as any).partnerCustomerId;
         if (!c) continue;
-        const key = c._id.toString();
-        const entry =
-          byCustomer.get(key) ||
-          ({ name: c.name, count: 0, cbm: 0, qty: 0 } as any);
+        const key = c._id?.toString() || c.toString();
+        const entry = byCustomer.get(key) || {
+          name: c.name || 'Unknown',
+          count: 0,
+          cbm: 0,
+          qty: 0,
+        };
         entry.count += 1;
         entry.cbm += s.cbm || 0;
         entry.qty += s.quantity || 0;
         byCustomer.set(key, entry);
       }
       for (const entry of byCustomer.values()) {
-        sheet.addRow([entry.name, entry.count, entry.cbm, entry.qty]);
+        sheet.addRow([
+          entry.name,
+          entry.count,
+          entry.cbm.toFixed(3),
+          entry.qty,
+        ]);
       }
-
-      sheet.addRow([]);
-      sheet.addRow(['Per Partner']);
-      sheet.addRow(['Partner Name', 'Shipments', 'Total CBM', 'Total Qty']);
-      const byPartner = new Map<
-        string,
-        { name: string; count: number; cbm: number; qty: number }
-      >();
-      for (const s of shipments) {
-        const p: any = s.partnerId;
-        if (!p) continue;
-        const key = p._id.toString();
-        const entry =
-          byPartner.get(key) ||
-          ({ name: p.name, count: 0, cbm: 0, qty: 0 } as any);
-        entry.count += 1;
-        entry.cbm += s.cbm || 0;
-        entry.qty += s.quantity || 0;
-        byPartner.set(key, entry);
-      }
-      for (const entry of byPartner.values()) {
-        sheet.addRow([entry.name, entry.count, entry.cbm, entry.qty]);
-      }
-
-      this.logger.log(
-        `[exportShipmentsExcel] Summary - customers: ${byCustomer.size}, partners: ${byPartner.size}`,
-      );
     } else {
-      this.logger.log(
-        `[exportShipmentsExcel] Detailed mode - adding ${shipments.length} rows`,
-      );
-      // Detailed
       sheet.addRow([
         'Tracking Number',
         'Status',
@@ -317,7 +242,7 @@ export class ReportsService {
         'Partner Customer Phone',
         'Container Number',
         'Description',
-        'Received At',
+        'Created At',
         'Delivered At',
       ]);
       for (const s of shipments) {
@@ -340,12 +265,11 @@ export class ReportsService {
           pc?.phone ?? '',
           cont?.containerNumber ?? '',
           s.description ?? '',
-          s.receivedAt ? s.receivedAt.toISOString() : '',
+          (s as any).createdAt ? (s as any).createdAt.toISOString() : '',
           s.deliveredAt ? s.deliveredAt.toISOString() : '',
         ]);
       }
     }
-
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
 
@@ -375,35 +299,79 @@ export class ReportsService {
     const sheet = workbook.addWorksheet('Customers');
 
     if (dto.mode === ReportMode.SUMMARY) {
-      // Summary: counts by type and location
-      sheet.addRow(['Summary']);
-      sheet.addRow(['Total Customers', customers.length]);
-      sheet.addRow([]);
+      if (dto.customerId && customers.length === 1) {
+        const targetCustomer = customers[0];
+        const shipments = await this.shipmentModel
+          .find({
+            ...orgFilter,
+            $or: [
+              { customerId: targetCustomer._id },
+              { partnerCustomerId: targetCustomer._id },
+            ],
+          })
+          .exec();
 
-      sheet.addRow(['By Type']);
-      sheet.addRow(['Type', 'Count']);
-      const byType = new Map<string, number>();
-      for (const c of customers) {
-        const key = c.type;
-        byType.set(key, (byType.get(key) || 0) + 1);
-      }
-      for (const [type, count] of byType.entries()) {
-        sheet.addRow([type, count]);
-      }
+        sheet.addRow(['CUSTOMER DASHBOARD']);
+        sheet.addRow(['Name', targetCustomer.name]);
+        sheet.addRow(['Type', targetCustomer.type]);
+        sheet.addRow(['Location', targetCustomer.location]);
+        sheet.addRow(['Email', targetCustomer.email || 'N/A']);
+        sheet.addRow(['Phone', targetCustomer.phone || 'N/A']);
+        sheet.addRow([]);
 
-      sheet.addRow([]);
-      sheet.addRow(['By Location']);
-      sheet.addRow(['Location', 'Count']);
-      const byLocation = new Map<string, number>();
-      for (const c of customers) {
-        const key = c.location;
-        byLocation.set(key, (byLocation.get(key) || 0) + 1);
-      }
-      for (const [loc, count] of byLocation.entries()) {
-        sheet.addRow([loc, count]);
+        const totalCbm = shipments.reduce((s, ship) => s + (ship.cbm || 0), 0);
+        const totalQty = shipments.reduce(
+          (s, ship) => s + (ship.quantity || 0),
+          0,
+        );
+
+        sheet.addRow(['KEY METRICS']);
+        sheet.addRow(['Total Shipments', shipments.length]);
+        sheet.addRow(['Total Volume (CBM)', totalCbm.toFixed(3)]);
+        sheet.addRow(['Total Quantity (Items)', totalQty]);
+        sheet.addRow([
+          'Average CBM per Shipment',
+          shipments.length ? (totalCbm / shipments.length).toFixed(3) : 0,
+        ]);
+        sheet.addRow([]);
+
+        sheet.addRow(['SHIPMENT STATUS BREAKDOWN']);
+        const statusCounts = new Map<string, number>();
+        shipments.forEach((s) =>
+          statusCounts.set(s.status, (statusCounts.get(s.status) || 0) + 1),
+        );
+        for (const [status, count] of statusCounts.entries()) {
+          sheet.addRow([status.toUpperCase().replace(/_/g, ' '), count]);
+        }
+
+        if (shipments.length > 0) {
+          const dates = shipments
+            .map((s) => (s as any).createdAt)
+            .filter(Boolean)
+            .sort();
+          sheet.addRow([]);
+          sheet.addRow(['ACTIVITY DATES']);
+          sheet.addRow([
+            'First Shipment',
+            dates[0].toISOString().split('T')[0],
+          ]);
+          sheet.addRow([
+            'Latest Shipment',
+            dates[dates.length - 1].toISOString().split('T')[0],
+          ]);
+        }
+      } else {
+        sheet.addRow(['Summary']);
+        sheet.addRow(['Total Customers', customers.length]);
+        sheet.addRow([]);
+        sheet.addRow(['By Type']);
+        const byType = new Map<string, number>();
+        customers.forEach((c) =>
+          byType.set(c.type, (byType.get(c.type) || 0) + 1),
+        );
+        byType.forEach((count, type) => sheet.addRow([type, count]));
       }
     } else {
-      // Per-Customer Detailed Report including Shipments
       sheet.addRow([
         'Customer Name',
         'Customer Type',
@@ -420,10 +388,7 @@ export class ReportsService {
         'Quantity',
         'Total Shipments (Lifetime)',
       ]);
-
       const customerIds = customers.map((c) => c._id);
-
-      // Fetch all shipments for these customers at once for performance
       const shipments = await this.shipmentModel
         .find({
           ...orgFilter,
@@ -436,44 +401,34 @@ export class ReportsService {
         .sort({ createdAt: -1 })
         .exec();
 
-      // Group shipments by customer ID (checking both fields)
       const shipmentsByCustomer = new Map<string, ShipmentDocument[]>();
-      for (const s of shipments) {
-        const adminId = s.customerId?.toString();
-        const partnerCustId = s.partnerCustomerId?.toString();
-
-        if (adminId) {
-          const list = shipmentsByCustomer.get(adminId) || [];
-          list.push(s);
-          shipmentsByCustomer.set(adminId, list);
-        }
-        if (partnerCustId && partnerCustId !== adminId) {
-          const list = shipmentsByCustomer.get(partnerCustId) || [];
-          list.push(s);
-          shipmentsByCustomer.set(partnerCustId, list);
-        }
-      }
+      shipments.forEach((s) => {
+        const ids = [
+          s.customerId?.toString(),
+          s.partnerCustomerId?.toString(),
+        ].filter(Boolean);
+        [...new Set(ids)].forEach((id) => {
+          const entries = shipmentsByCustomer.get(id!) || [];
+          entries.push(s);
+          shipmentsByCustomer.set(id!, entries);
+        });
+      });
 
       for (const c of customers) {
         const p: any = c.partnerId;
-        const customerShipments =
-          shipmentsByCustomer.get(c._id.toString()) || [];
+        const cShips = shipmentsByCustomer.get(c._id.toString()) || [];
+        if (dto.onlyWithShipments && cShips.length === 0) continue;
 
-        if (dto.onlyWithShipments && customerShipments.length === 0) {
-          continue;
-        }
-
-        if (customerShipments.length === 0) {
-          // Row for customer with no shipments
+        if (cShips.length === 0) {
           sheet.addRow([
             c.name,
             c.type,
             c.location,
-            c.email ?? '',
-            c.phone ?? '',
-            c.address ?? '',
-            p?.name ?? '',
-            p?.phoneNumber ?? '',
+            c.email || '',
+            c.phone || '',
+            c.address || '',
+            p?.name || '',
+            p?.phoneNumber || '',
             'N/A',
             'N/A',
             'N/A',
@@ -482,30 +437,28 @@ export class ReportsService {
             0,
           ]);
         } else {
-          // Multiple rows: one for each shipment
-          for (const s of customerShipments) {
+          for (const s of cShips) {
             const cont: any = s.containerId;
             sheet.addRow([
               c.name,
               c.type,
               c.location,
-              c.email ?? '',
-              c.phone ?? '',
-              c.address ?? '',
-              p?.name ?? '',
-              p?.phoneNumber ?? '',
+              c.email || '',
+              c.phone || '',
+              c.address || '',
+              p?.name || '',
+              p?.phoneNumber || '',
               s.trackingNumber,
               s.status,
-              cont?.containerNumber ?? 'Not Loaded',
-              s.cbm ?? 0,
-              s.quantity ?? 0,
-              customerShipments.length,
+              cont?.containerNumber || 'Not Loaded',
+              s.cbm || 0,
+              s.quantity || 0,
+              cShips.length,
             ]);
           }
         }
       }
     }
-
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
 
@@ -513,79 +466,30 @@ export class ReportsService {
     dto: GenerateExcelReportDto,
     organization?: Organization,
   ): Promise<Uint8Array> {
-    const { from, to } = this.parseDateRange(dto);
-
     const orgFilter = organization ? buildOrganizationFilter(organization) : {};
     const containerQuery: any = { ...orgFilter };
-    if (dto.containerId) {
+    if (dto.containerId)
       containerQuery._id = new Types.ObjectId(dto.containerId);
-    }
 
-    // For now, ignore date range on containers; could map to departure/arrival later
     const containers = await this.containerModel
       .find(containerQuery)
       .sort({ createdAt: -1 })
       .exec();
-
-    // Preload shipments per container if detailed mode
-    let shipmentsByContainer = new Map<string, ShipmentDocument[]>();
-    if (dto.mode === ReportMode.DETAILED) {
-      const containerIds = containers.map((c) => c._id);
-      const shipmentQuery: any = {
-        containerId: { $in: containerIds },
-        ...orgFilter,
-      };
-
-      if (dto.customerId) {
-        const targetCustomerId = new Types.ObjectId(dto.customerId);
-        shipmentQuery.$or = [
-          { customerId: targetCustomerId },
-          { partnerCustomerId: targetCustomerId },
-        ];
-      }
-
-      if (from || to) {
-        shipmentQuery.receivedAt = {};
-        if (from) shipmentQuery.receivedAt.$gte = from;
-        if (to) shipmentQuery.receivedAt.$lte = to;
-      }
-      const shipments = await this.shipmentModel
-        .find(shipmentQuery)
-        .populate('customerId', 'name phone email')
-        .populate('partnerId', 'name phoneNumber')
-        .exec();
-      shipmentsByContainer = shipments.reduce((map, s) => {
-        const key = s.containerId?.toString() || 'unknown';
-        const arr = map.get(key) || [];
-        arr.push(s);
-        map.set(key, arr);
-        return map;
-      }, new Map<string, ShipmentDocument[]>());
-    }
-
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Containers');
 
     if (dto.mode === ReportMode.SUMMARY) {
-      // Summary: one row per container with counts/totals
       sheet.addRow(['Container Number', 'Status', 'Total Shipments']);
       for (const c of containers) {
-        const filter: any = {
-          containerId: c._id,
-          ...orgFilter,
-        };
+        const filter: any = { containerId: c._id, ...orgFilter };
         if (dto.customerId) {
-          const targetCustomerId = new Types.ObjectId(dto.customerId);
-          filter.$or = [
-            { customerId: targetCustomerId },
-            { partnerCustomerId: targetCustomerId },
-          ];
+          const target = new Types.ObjectId(dto.customerId);
+          filter.$or = [{ customerId: target }, { partnerCustomerId: target }];
         }
-        const shipmentsCount = await this.shipmentModel.countDocuments(filter);
-        sheet.addRow([c.containerNumber, c.status, shipmentsCount]);
+        const count = await this.shipmentModel.countDocuments(filter);
+        sheet.addRow([c.containerNumber, c.status, count]);
       }
     } else {
-      // Detailed: one row per shipment in each container
       sheet.addRow([
         'Container Number',
         'Container Status',
@@ -598,43 +502,55 @@ export class ReportsService {
         'CBM',
         'Quantity',
       ]);
+      const containerIds = containers.map((c) => c._id);
+      const shipFilter: any = {
+        containerId: { $in: containerIds },
+        ...orgFilter,
+      };
+      if (dto.customerId) {
+        const target = new Types.ObjectId(dto.customerId);
+        shipFilter.$or = [
+          { customerId: target },
+          { partnerCustomerId: target },
+        ];
+      }
+      const shipments = await this.shipmentModel
+        .find(shipFilter)
+        .populate('customerId', 'name phone')
+        .populate('partnerId', 'name phoneNumber')
+        .exec();
+      const shipsByContainer = new Map<string, ShipmentDocument[]>();
+      shipments.forEach((s) => {
+        const key = s.containerId?.toString() || 'unknown';
+        const arr = shipsByContainer.get(key) || [];
+        arr.push(s);
+        shipsByContainer.set(key, arr);
+      });
 
       for (const c of containers) {
-        const list = shipmentsByContainer.get(c._id.toString()) || [];
+        const list = shipsByContainer.get(c._id.toString()) || [];
         if (list.length === 0) {
-          sheet.addRow([
-            c.containerNumber,
-            c.status,
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-          ]);
+          sheet.addRow([c.containerNumber, c.status, ...Array(8).fill('')]);
         } else {
           for (const s of list) {
             const cust: any = s.customerId;
-            const partner: any = s.partnerId;
+            const part: any = s.partnerId;
             sheet.addRow([
               c.containerNumber,
               c.status,
               s.trackingNumber,
               s.status,
-              cust?.name ?? '',
-              cust?.phone ?? '',
-              partner?.name ?? '',
-              partner?.phoneNumber ?? '',
-              s.cbm ?? '',
-              s.quantity ?? '',
+              cust?.name || '',
+              cust?.phone || '',
+              part?.name || '',
+              part?.phoneNumber || '',
+              s.cbm || '',
+              s.quantity || '',
             ]);
           }
         }
       }
     }
-
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
 }
