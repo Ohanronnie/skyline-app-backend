@@ -6,7 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -153,7 +153,7 @@ export class CustomersService {
     id: string,
     organization: Organization,
   ): Promise<CustomerDocument> {
-    let filter = { _id: id, ...buildOrganizationFilter(organization) };
+    let filter = { _id: new Types.ObjectId( id) };
     console.log('filter-', filter);
     const found = await this.customerModel.findOne(filter).exec();
     console.log('after findOne-', found);
