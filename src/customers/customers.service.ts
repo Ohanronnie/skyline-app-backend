@@ -93,6 +93,7 @@ export class CustomersService {
     paginate: boolean = false,
     page: number = 1,
     limit: number = 10,
+    search?: string,
   ): Promise<
     | CustomerDocument[]
     | {
@@ -100,11 +101,20 @@ export class CustomersService {
         total: number;
         page: number;
         limit: number;
-      totalPages: number;
+        totalPages: number;
         agentsCount: number;
       }
   > {
     const filter: any = { ...buildOrganizationFilter(organization) };
+
+    if (search) {
+      const sanitized = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { name: { $regex: sanitized, $options: 'i' } },
+        { phone: { $regex: sanitized, $options: 'i' } },
+      ];
+    }
+
     if (partnerId) {
       filter.partnerId = partnerId;
     }
@@ -123,7 +133,10 @@ export class CustomersService {
         .limit(limit)
         .exec(),
       this.customerModel.countDocuments(filter),
-      this.customerModel.countDocuments({ ...filter, type: CustomerType.AGENT })
+      this.customerModel.countDocuments({
+        ...filter,
+        type: CustomerType.AGENT,
+      }),
     ]);
 
     return {
@@ -141,11 +154,9 @@ export class CustomersService {
     organization: Organization,
   ): Promise<CustomerDocument> {
     let filter = { _id: id, ...buildOrganizationFilter(organization) };
-    console.log("filter-", filter);
-    const found = await this.customerModel
-      .findOne(filter)
-      .exec();
-    console.log("after findOne-", found);
+    console.log('filter-', filter);
+    const found = await this.customerModel.findOne(filter).exec();
+    console.log('after findOne-', found);
     if (!found) throw new NotFoundException('Customer not found');
     return found;
   }
@@ -252,14 +263,13 @@ export class CustomersService {
     id: string,
     organization: Organization,
   ): Promise<ShipmentDocument[]> {
-    console.log("organization", organization)
-    console.log("before findOne");
+  
     await this.findOne(id, organization);
-    console.log("after findOne");
+
     let shipments = await this.shipmentModel
       .find({ customerId: id, ...buildOrganizationFilter(organization) })
       .exec();
-    console.log(shipments);
+
     return shipments;
   }
 

@@ -120,11 +120,53 @@ export class PartnersService {
       .exec();
   }
 
-  async findAll(organization: Organization) {
-    const partners = await this.partnerModel
-      .find(buildOrganizationFilter(organization))
-      .exec();
-    return Promise.all(partners.map((p) => this.attachStats(p)));
+  async findAll(
+    organization: Organization,
+    paginate: boolean = false,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const filter: any = { ...buildOrganizationFilter(organization) };
+
+    if (search) {
+      const sanitized = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { name: { $regex: sanitized, $options: 'i' } },
+        { phoneNumber: { $regex: sanitized, $options: 'i' } },
+        { email: { $regex: sanitized, $options: 'i' } },
+      ];
+    }
+
+    if (!paginate) {
+      const partners = await this.partnerModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .exec();
+      return Promise.all(partners.map((p) => this.attachStats(p)));
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [partners, total] = await Promise.all([
+      this.partnerModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.partnerModel.countDocuments(filter),
+    ]);
+
+    const data = await Promise.all(partners.map((p) => this.attachStats(p)));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findById(id: string) {
@@ -164,10 +206,50 @@ export class PartnersService {
     return this.issueTokens(partner);
   }
 
-  async getCustomers(partnerId: string, organization: Organization) {
-    return this.customerModel
-      .find({ partnerId, ...buildOrganizationFilter(organization) })
-      .exec();
+  async getCustomers(
+    partnerId: string,
+    organization: Organization,
+    paginate: boolean = false,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const filter: any = {
+      partnerId,
+      ...buildOrganizationFilter(organization),
+    };
+
+    if (search) {
+      const sanitized = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { name: { $regex: sanitized, $options: 'i' } },
+        { phone: { $regex: sanitized, $options: 'i' } },
+      ];
+    }
+
+    if (!paginate) {
+      return this.customerModel.find(filter).sort({ createdAt: -1 }).exec();
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.customerModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.customerModel.countDocuments(filter),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   // Send OTP via Event and Cache

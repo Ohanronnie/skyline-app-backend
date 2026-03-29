@@ -52,6 +52,7 @@ export class CustomersController {
     @Query('paginate') paginate?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     const partnerId =
       user.isPartner || user.role === 'partner' ? user.userId : undefined;
@@ -61,9 +62,10 @@ export class CustomersController {
       paginate === 'true',
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 10,
-      
+      search,
     );
   }
+
 
   @Get('search')
   async search(

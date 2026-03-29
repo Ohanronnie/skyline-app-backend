@@ -6,6 +6,7 @@ import {
   Get,
   Req,
   Put,
+  Query,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { PartnersService } from './partners.service';
@@ -93,16 +94,39 @@ export class PartnersController {
   async getMyCustomers(
     @CurrentUser() user: any,
     @CurrentOrganization() organization: Organization,
+    @Query('paginate') paginate?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     // Get current partner's customers
-    return this.partnersService.getCustomers(user.userId, organization);
+    return this.partnersService.getCustomers(
+      user.userId,
+      organization,
+      paginate === 'true',
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 10,
+      search,
+    );
   }
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
-  async findAll(@CurrentOrganization() organization: Organization) {
-    return this.partnersService.findAll(organization);
+  async findAll(
+    @CurrentOrganization() organization: Organization,
+    @Query('paginate') paginate?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.partnersService.findAll(
+      organization,
+      paginate === 'true',
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 10,
+      search,
+    );
   }
 
   @Post()
