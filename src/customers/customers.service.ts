@@ -13,7 +13,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcryptjs';
-import { Customer, CustomerDocument } from './customers.schema';
+import { Customer, CustomerDocument, CustomerType } from './customers.schema';
 import { Shipment, ShipmentDocument } from '../shipments/shipments.schema';
 import { Organization } from '../user/users.schema';
 import { SmsSendEvent } from '../events/sms.events';
@@ -100,7 +100,8 @@ export class CustomersService {
         total: number;
         page: number;
         limit: number;
-        totalPages: number;
+      totalPages: number;
+        agentsCount: number;
       }
   > {
     const filter: any = { ...buildOrganizationFilter(organization) };
@@ -114,7 +115,7 @@ export class CustomersService {
 
     const skip = (page - 1) * limit;
 
-    const [data, total] = await Promise.all([
+    const [data, total, agentsCount] = await Promise.all([
       this.customerModel
         .find(filter)
         .sort({ createdAt: -1 })
@@ -122,6 +123,7 @@ export class CustomersService {
         .limit(limit)
         .exec(),
       this.customerModel.countDocuments(filter),
+      this.customerModel.countDocuments({ ...filter, type: CustomerType.AGENT })
     ]);
 
     return {
@@ -129,6 +131,7 @@ export class CustomersService {
       total,
       page,
       limit,
+      agentsCount,
       totalPages: Math.ceil(total / limit),
     };
   }

@@ -61,6 +61,7 @@ export class CustomersController {
       paginate === 'true',
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 10,
+      
     );
   }
 
