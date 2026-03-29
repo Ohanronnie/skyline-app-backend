@@ -49,10 +49,19 @@ export class CustomersController {
   async findAll(
     @CurrentOrganization() organization: Organization,
     @CurrentUser() user: any,
+    @Query('paginate') paginate?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const partnerId =
       user.isPartner || user.role === 'partner' ? user.userId : undefined;
-    return this.customersService.findAll(organization, partnerId);
+    return this.customersService.findAll(
+      organization,
+      partnerId,
+      paginate === 'true',
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 10,
+    );
   }
 
   @Get('search')

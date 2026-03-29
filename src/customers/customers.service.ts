@@ -90,12 +90,47 @@ export class CustomersService {
   async findAll(
     organization: Organization,
     partnerId?: string,
-  ): Promise<CustomerDocument[]> {
+    paginate: boolean = false,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<
+    | CustomerDocument[]
+    | {
+        data: CustomerDocument[];
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }
+  > {
     const filter: any = { ...buildOrganizationFilter(organization) };
     if (partnerId) {
       filter.partnerId = partnerId;
     }
-    return this.customerModel.find(filter).exec();
+
+    if (!paginate) {
+      return this.customerModel.find(filter).sort({ createdAt: -1 }).exec();
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.customerModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.customerModel.countDocuments(filter),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(
