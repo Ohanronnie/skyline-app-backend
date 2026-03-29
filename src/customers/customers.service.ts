@@ -452,4 +452,23 @@ export class CustomersService {
       refreshTokenHash: hash,
     });
   }
+
+  async remove(
+    id: string,
+    organization: Organization,
+    partnerId?: string,
+  ): Promise<void> {
+    const filter: any = { _id: id, ...buildOrganizationFilter(organization) };
+    if (partnerId) {
+      filter.partnerId = partnerId;
+    }
+
+    const updated = await this.customerModel
+      .findOneAndUpdate(filter, { $set: { deletedAt: new Date() } })
+      .exec();
+
+    if (!updated) {
+      throw new NotFoundException('Customer not found');
+    }
+  }
 }

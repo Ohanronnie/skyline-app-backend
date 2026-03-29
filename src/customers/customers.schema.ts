@@ -72,16 +72,40 @@ export class Customer {
 
   @Prop({ type: String, default: null, select: false })
   refreshTokenHash?: string | null;
+
+  @Prop({ type: Date, default: null })
+  deletedAt?: Date | null;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
 
-// Compound unique indexes for email and phone per organization
+// Compound unique indexes for email and phone per organization, including deletedAt to allow reuse
 CustomerSchema.index(
-  { email: 1, organization: 1 },
+  { email: 1, organization: 1, deletedAt: 1 },
   { unique: true, sparse: true },
 );
 CustomerSchema.index(
-  { phone: 1, organization: 1 },
+  { phone: 1, organization: 1, deletedAt: 1 },
   { unique: true, sparse: true },
 );
+
+// Query middleware to automatically filter out deleted documents
+CustomerSchema.pre(/^find/, function (next) {
+  (this as any).where({ deletedAt: null });
+  next();
+});
+
+CustomerSchema.pre('countDocuments', function (next) {
+  (this as any).where({ deletedAt: null });
+  next();
+});
+
+CustomerSchema.pre('aggregate', function (next) {
+  (this as any).pipeline().unshift({ $match: { deletedAt: null } });
+  next();
+});
+
+CustomerSchema.pre('findOneAndUpdate', function (next) {
+  (this as any).where({ deletedAt: null });
+  next();
+});

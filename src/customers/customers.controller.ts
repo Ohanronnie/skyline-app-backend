@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
   Put,
@@ -117,5 +120,18 @@ export class CustomersController {
   ) {
     console.log(user);
     return this.customersService.shipments(id, organization);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(
+    @Param('id') id: string,
+    @CurrentOrganization() organization: Organization,
+    @CurrentUser() user: any,
+  ) {
+    const partnerId =
+      user.isPartner || user.role === 'partner' ? user.userId : undefined;
+    return this.customersService.remove(id, organization, partnerId);
   }
 }
