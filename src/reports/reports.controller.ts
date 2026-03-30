@@ -44,6 +44,7 @@ export class ReportsController {
   async exportExcel(
     @Body() dto: GenerateExcelReportDto,
     @Query('status') status: string | string[] | undefined,
+    @Query('debug') debug: string | undefined,
     @CurrentOrganization() organization: Organization,
     @Res() res: Response,
   ) {
@@ -56,6 +57,12 @@ export class ReportsController {
       ] as any;
     }
     console.log(dto);
+
+    // If debug is true, return JSON instead of Excel
+    if (debug === 'true') {
+      const data = await this.reportsService.getExportData(dto, organization);
+      return res.json(data);
+    }
 
     const buffer = await this.reportsService.exportExcel(dto, organization);
     res.setHeader(

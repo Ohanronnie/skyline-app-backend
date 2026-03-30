@@ -192,11 +192,33 @@ export class ShipmentsService {
     const baseFilter: FilterQuery<ShipmentDocument> = {
       ...buildOrganizationFilter(organization),
     };
+    const filters: any[] = [];
     if (partnerId) {
-      baseFilter.partnerId = partnerId;
+      const targetPartnerId = new Types.ObjectId(partnerId);
+      filters.push({
+        $or: [
+          { partnerId: targetPartnerId },
+          { partnerIds: targetPartnerId },
+          { 'partnerAssignments.partnerId': targetPartnerId },
+        ],
+      });
     }
     if (customerId) {
-      baseFilter.customerId = customerId;
+      const targetCustomerId = new Types.ObjectId(customerId);
+      filters.push({
+        $or: [
+          { customerId: targetCustomerId },
+          { customerIds: targetCustomerId },
+          { partnerCustomerId: targetCustomerId },
+          { 'partnerAssignments.customerId': targetCustomerId },
+        ],
+      });
+    }
+
+    if (filters.length === 1) {
+      baseFilter.$or = filters[0].$or;
+    } else if (filters.length > 1) {
+      baseFilter.$and = filters;
     }
 
     const skip = (page - 1) * limit;

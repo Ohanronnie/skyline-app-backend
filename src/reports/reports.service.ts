@@ -96,11 +96,27 @@ export class ReportsService {
 
     switch (dto.type) {
       case ReportType.SHIPMENTS:
-        return this.exportShipmentsExcel(dto, organization);
+        return this.generateShipmentsExcel(dto, organization);
       case ReportType.CUSTOMERS:
-        return this.exportCustomersExcel(dto, organization);
+        return this.generateCustomersExcel(dto, organization);
       case ReportType.CONTAINERS:
-        return this.exportContainersExcel(dto, organization);
+        return this.generateContainersExcel(dto, organization);
+      default:
+        throw new Error('Unsupported report type');
+    }
+  }
+
+  async getExportData(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ): Promise<any> {
+    switch (dto.type) {
+      case ReportType.SHIPMENTS:
+        return this.getShipmentsData(dto, organization);
+      case ReportType.CUSTOMERS:
+        return this.getCustomersData(dto, organization);
+      case ReportType.CONTAINERS:
+        return this.getContainersData(dto, organization);
       default:
         throw new Error('Unsupported report type');
     }
@@ -119,41 +135,52 @@ export class ReportsService {
     return { from, to };
   }
 
-  private buildDateQuery(
-    dto: GenerateExcelReportDto,
-    field: string = 'createdAt',
-  ) {
-    const { from, to } = this.parseDateRange(dto);
-    if (!from && !to) return {};
-    const query: any = {};
-    query[field] = {};
-    if (from) query[field].$gte = from;
-    if (to) query[field].$lte = to;
-    return query;
-  }
-
-  private async exportShipmentsExcel(
+  private buildShipmentFilter(
     dto: GenerateExcelReportDto,
     organization?: Organization,
-  ): Promise<Uint8Array> {
-    this.logger.log(`[exportShipmentsExcel] Starting - mode: ${dto.mode}`);
-
+  ) {
     const dateQuery = this.buildDateQuery(dto, 'createdAt');
     const query: any = { ...dateQuery };
 
-    if (dto.partnerId) {
-      query.partnerId = new Types.ObjectId(dto.partnerId);
+    if (organization) {
+      Object.assign(query, buildOrganizationFilter(organization));
     }
+
+    const filters: any[] = [];
+
+    if (dto.partnerId) {
+      const targetPartnerId = new Types.ObjectId(dto.partnerId);
+      filters.push({
+        $or: [
+          { partnerId: targetPartnerId },
+          { partnerIds: targetPartnerId },
+          { 'partnerAssignments.partnerId': targetPartnerId },
+        ],
+      });
+    }
+
     if (dto.customerId) {
       const targetCustomerId = new Types.ObjectId(dto.customerId);
-      query.$or = [
-        { customerId: targetCustomerId },
-        { partnerCustomerId: targetCustomerId },
-      ];
+      filters.push({
+        $or: [
+          { customerId: targetCustomerId },
+          { customerIds: targetCustomerId },
+          { partnerCustomerId: targetCustomerId },
+          { 'partnerAssignments.customerId': targetCustomerId },
+        ],
+      });
     }
+
+    if (filters.length === 1) {
+      query.$or = filters[0].$or;
+    } else if (filters.length > 1) {
+      query.$and = filters;
+    }
+
     if (dto.containerId) {
       query.containerId = new Types.ObjectId(dto.containerId);
     }
+
     if (dto.shipmentStatuses?.length) {
       query.status = { $in: dto.shipmentStatuses };
     }
@@ -167,18 +194,50 @@ export class ReportsService {
       };
     }
 
-    if (organization) {
-      Object.assign(query, buildOrganizationFilter(organization));
-    }
+    this.logger.log(`[buildShipmentFilter] Final query: ${JSON.stringify(query)}`);
+    return query;
+  }
 
-    const shipments = await this.shipmentModel
+  private buildDateQuery(
+    dto: GenerateExcelReportDto,
+    field: string = 'createdAt',
+  ) {
+    const { from, to } = this.parseDateRange(dto);
+    if (!from && !to) return {};
+    const query: any = {};
+    query[field] = {};
+    if (from) query[field].$gte = from;
+    if (to) query[field].$lte = to;
+    return query;
+  }
+
+  private async getShipmentsData(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ) {
+    const query = this.buildShipmentFilter(dto, organization);
+    return this.shipmentModel
       .find(query)
       .populate('customerId', 'name phone email location')
+      .populate('customerIds', 'name phone email location')
       .populate('partnerId', 'name phoneNumber')
       .populate('partnerCustomerId', 'name phone email location')
+      .populate({
+        path: 'partnerAssignments.customerId',
+        select: 'name phone email location',
+      })
       .populate('containerId', 'containerNumber')
       .sort({ createdAt: -1 })
       .exec();
+  }
+
+  private async generateShipmentsExcel(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ): Promise<Uint8Array> {
+    this.logger.log(`[generateShipmentsExcel] Starting - mode: ${dto.mode}`);
+
+    const shipments = await this.getShipmentsData(dto, organization);
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Shipments');
@@ -204,19 +263,44 @@ export class ReportsService {
         { name: string; count: number; cbm: number; qty: number }
       >();
       for (const s of shipments) {
-        const c: any = s.customerId || (s as any).partnerCustomerId;
-        if (!c) continue;
-        const key = c._id?.toString() || c.toString();
-        const entry = byCustomer.get(key) || {
-          name: c.name || 'Unknown',
-          count: 0,
-          cbm: 0,
-          qty: 0,
-        };
-        entry.count += 1;
-        entry.cbm += s.cbm || 0;
-        entry.qty += s.quantity || 0;
-        byCustomer.set(key, entry);
+        // Collect all related customer IDs and names for summary
+        const relatedCustomers = new Set<string>();
+        if (s.customerId) relatedCustomers.add(s.customerId.toString());
+        if (s.partnerCustomerId)
+          relatedCustomers.add(s.partnerCustomerId.toString());
+        if (s.customerIds)
+          s.customerIds.forEach((id: any) => relatedCustomers.add(id.toString()));
+        if (s.partnerAssignments)
+          s.partnerAssignments.forEach((a: any) =>
+            relatedCustomers.add(a.customerId.toString()),
+          );
+
+        if (relatedCustomers.size === 0) continue;
+
+        for (const key of relatedCustomers) {
+          // Find the customer object for name
+          let name = 'Unknown';
+          const c: any =
+            [
+              s.customerId,
+              s.partnerCustomerId,
+              ...(s.customerIds || []),
+              ...(s.partnerAssignments || []).map((a: any) => a.customerId),
+            ].find((cust: any) => cust?._id?.toString() === key) || key;
+
+          name = (c as any).name || 'Unknown';
+
+          const entry = byCustomer.get(key) || {
+            name,
+            count: 0,
+            cbm: 0,
+            qty: 0,
+          };
+          entry.count += 1;
+          entry.cbm += s.cbm || 0;
+          entry.qty += s.quantity || 0;
+          byCustomer.set(key, entry);
+        }
       }
       for (const entry of byCustomer.values()) {
         sheet.addRow([
@@ -273,14 +357,17 @@ export class ReportsService {
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
 
-  private async exportCustomersExcel(
+  private async getCustomersData(
     dto: GenerateExcelReportDto,
     organization?: Organization,
-  ): Promise<Uint8Array> {
+  ) {
     const orgFilter = organization ? buildOrganizationFilter(organization) : {};
     const query: any = { ...orgFilter };
     if (dto.customerId) {
       query._id = new Types.ObjectId(dto.customerId);
+    }
+    if (dto.partnerId) {
+      query.partnerId = new Types.ObjectId(dto.partnerId);
     }
     if (dto.customerTypes?.length) {
       query.type = { $in: dto.customerTypes };
@@ -295,33 +382,96 @@ export class ReportsService {
       .sort({ createdAt: -1 })
       .exec();
 
+    if (dto.mode === ReportMode.SUMMARY && dto.customerId && customers.length === 1) {
+      const targetCustomer = customers[0];
+      const shipments = await this.shipmentModel
+        .find({
+          ...orgFilter,
+          $or: [
+            { customerId: targetCustomer._id },
+            { customerIds: targetCustomer._id },
+            { partnerCustomerId: targetCustomer._id },
+            { 'partnerAssignments.customerId': targetCustomer._id },
+          ],
+        })
+        .exec();
+      return { customer: targetCustomer, shipments };
+    }
+
+    if (dto.mode === ReportMode.DETAILED) {
+      const customerIds = customers.map((c) => c._id);
+      const filters: any[] = [
+        {
+          $or: [
+            { customerId: { $in: customerIds } },
+            { customerIds: { $in: customerIds } },
+            { partnerCustomerId: { $in: customerIds } },
+            { 'partnerAssignments.customerId': { $in: customerIds } },
+          ],
+        },
+      ];
+
+      if (dto.partnerId) {
+        const targetPartnerId = new Types.ObjectId(dto.partnerId);
+        filters.push({
+          $or: [
+            { partnerId: targetPartnerId },
+            { partnerIds: targetPartnerId },
+            { 'partnerAssignments.partnerId': targetPartnerId },
+          ],
+        });
+      }
+
+      const shipmentQuery: any = { ...orgFilter };
+      if (filters.length === 1) {
+        shipmentQuery.$or = filters[0].$or;
+      } else {
+        shipmentQuery.$and = filters;
+      }
+
+      const shipments = await this.shipmentModel
+        .find(shipmentQuery)
+        .populate('containerId', 'containerNumber')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      return { customers, shipments };
+    }
+
+    return { customers };
+  }
+
+  private async generateCustomersExcel(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ): Promise<Uint8Array> {
+    this.logger.log(`[generateCustomersExcel] DTO: ${JSON.stringify(dto)}`);
+    const data = await this.getCustomersData(dto, organization);
+    const customers = data.customers || [data.customer];
+    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
+
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Customers');
 
     if (dto.mode === ReportMode.SUMMARY) {
       if (dto.customerId && customers.length === 1) {
-        const targetCustomer = customers[0];
-        const shipments = await this.shipmentModel
-          .find({
-            ...orgFilter,
-            $or: [
-              { customerId: targetCustomer._id },
-              { partnerCustomerId: targetCustomer._id },
-            ],
-          })
-          .exec();
+        const targetCustomer = data.customer;
+        const shipments = data.shipments || [];
 
         sheet.addRow(['CUSTOMER DASHBOARD']);
-        sheet.addRow(['Name', targetCustomer.name]);
-        sheet.addRow(['Type', targetCustomer.type]);
-        sheet.addRow(['Location', targetCustomer.location]);
-        sheet.addRow(['Email', targetCustomer.email || 'N/A']);
-        sheet.addRow(['Phone', targetCustomer.phone || 'N/A']);
+        sheet.addRow(['Name', targetCustomer?.name]);
+        sheet.addRow(['Type', targetCustomer?.type]);
+        sheet.addRow(['Location', targetCustomer?.location]);
+        sheet.addRow(['Email', targetCustomer?.email || 'N/A']);
+        sheet.addRow(['Phone', targetCustomer?.phone || 'N/A']);
         sheet.addRow([]);
 
-        const totalCbm = shipments.reduce((s, ship) => s + (ship.cbm || 0), 0);
+        const totalCbm = shipments.reduce(
+          (s: number, ship: any) => s + (ship.cbm || 0),
+          0,
+        );
         const totalQty = shipments.reduce(
-          (s, ship) => s + (ship.quantity || 0),
+          (s: number, ship: any) => s + (ship.quantity || 0),
           0,
         );
 
@@ -337,7 +487,7 @@ export class ReportsService {
 
         sheet.addRow(['SHIPMENT STATUS BREAKDOWN']);
         const statusCounts = new Map<string, number>();
-        shipments.forEach((s) =>
+        shipments.forEach((s: any) =>
           statusCounts.set(s.status, (statusCounts.get(s.status) || 0) + 1),
         );
         for (const [status, count] of statusCounts.entries()) {
@@ -346,7 +496,7 @@ export class ReportsService {
 
         if (shipments.length > 0) {
           const dates = shipments
-            .map((s) => (s as any).createdAt)
+            .map((s: any) => (s as any).createdAt)
             .filter(Boolean)
             .sort();
           sheet.addRow([]);
@@ -383,34 +533,36 @@ export class ReportsService {
         'Partner Phone',
         'Shipment Tracking',
         'Shipment Status',
+        'Match Source',
         'Container Number',
         'CBM',
         'Quantity',
         'Total Shipments (Lifetime)',
       ]);
-      const customerIds = customers.map((c) => c._id);
-      const shipments = await this.shipmentModel
-        .find({
-          ...orgFilter,
-          $or: [
-            { customerId: { $in: customerIds } },
-            { partnerCustomerId: { $in: customerIds } },
-          ],
-        })
-        .populate('containerId', 'containerNumber')
-        .sort({ createdAt: -1 })
-        .exec();
+      const shipments = data.shipments || [];
 
-      const shipmentsByCustomer = new Map<string, ShipmentDocument[]>();
-      shipments.forEach((s) => {
-        const ids = [
-          s.customerId?.toString(),
-          s.partnerCustomerId?.toString(),
-        ].filter(Boolean);
-        [...new Set(ids)].forEach((id) => {
-          const entries = shipmentsByCustomer.get(id!) || [];
-          entries.push(s);
-          shipmentsByCustomer.set(id!, entries);
+      const shipmentsByCustomer = new Map<
+        string,
+        Array<{ shipment: ShipmentDocument; source: string }>
+      >();
+      shipments.forEach((s: any) => {
+        const idToSource = new Map<string, string>();
+        if (s.customerId) idToSource.set(s.customerId.toString(), 'Primary');
+        if (s.partnerCustomerId)
+          idToSource.set(s.partnerCustomerId.toString(), 'Partner-Specific');
+        if (s.customerIds)
+          s.customerIds.forEach((id: any) =>
+            idToSource.set(id.toString(), 'Array (Multiple)'),
+          );
+        if (s.partnerAssignments)
+          s.partnerAssignments.forEach((a: any) =>
+            idToSource.set(a.customerId.toString(), 'Partner Assignment'),
+          );
+
+        idToSource.forEach((source, id) => {
+          const entries = shipmentsByCustomer.get(id) || [];
+          entries.push({ shipment: s, source });
+          shipmentsByCustomer.set(id, entries);
         });
       });
 
@@ -432,12 +584,14 @@ export class ReportsService {
             'N/A',
             'N/A',
             'N/A',
+            'N/A',
             0,
             0,
             0,
           ]);
         } else {
-          for (const s of cShips) {
+          for (const entry of cShips) {
+            const s = entry.shipment;
             const cont: any = s.containerId;
             sheet.addRow([
               c.name,
@@ -450,6 +604,7 @@ export class ReportsService {
               p?.phoneNumber || '',
               s.trackingNumber,
               s.status,
+              entry.source,
               cont?.containerNumber || 'Not Loaded',
               s.cbm || 0,
               s.quantity || 0,
@@ -462,10 +617,10 @@ export class ReportsService {
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
 
-  private async exportContainersExcel(
+  private async getContainersData(
     dto: GenerateExcelReportDto,
     organization?: Organization,
-  ): Promise<Uint8Array> {
+  ) {
     const orgFilter = organization ? buildOrganizationFilter(organization) : {};
     const containerQuery: any = { ...orgFilter };
     if (dto.containerId)
@@ -475,18 +630,63 @@ export class ReportsService {
       .find(containerQuery)
       .sort({ createdAt: -1 })
       .exec();
+
+    const shipmentFilter: any = {
+      containerId: { $in: containers.map((c) => c._id) },
+      ...orgFilter,
+    };
+
+    if (dto.customerId) {
+      const target = new Types.ObjectId(dto.customerId);
+      shipmentFilter.$or = [
+        { customerId: target },
+        { customerIds: target },
+        { partnerCustomerId: target },
+        { 'partnerAssignments.customerId': target },
+      ];
+    }
+
+    if (dto.mode === ReportMode.SUMMARY) {
+      const shipmentCounts = await this.shipmentModel
+        .aggregate([
+          { $match: shipmentFilter },
+          { $group: { _id: '$containerId', count: { $sum: 1 } } },
+        ])
+        .exec();
+      return { containers, shipmentCounts };
+    }
+
+    const shipments = await this.shipmentModel
+      .find(shipmentFilter)
+      .populate('customerId', 'name phone')
+      .populate('partnerId', 'name phoneNumber')
+      .exec();
+    return { containers, shipments };
+  }
+
+  private async generateContainersExcel(
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ): Promise<Uint8Array> {
+    const data = await this.getContainersData(dto, organization);
+    const containers = data.containers;
+    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
+
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Containers');
 
     if (dto.mode === ReportMode.SUMMARY) {
       sheet.addRow(['Container Number', 'Status', 'Total Shipments']);
+      const counts = data.shipmentCounts || [];
+      const countMap = new Map(
+        counts.map((item: any) => [
+          item._id?.toString(),
+          item.count,
+        ]),
+      );
+
       for (const c of containers) {
-        const filter: any = { containerId: c._id, ...orgFilter };
-        if (dto.customerId) {
-          const target = new Types.ObjectId(dto.customerId);
-          filter.$or = [{ customerId: target }, { partnerCustomerId: target }];
-        }
-        const count = await this.shipmentModel.countDocuments(filter);
+        const count = countMap.get(c._id.toString()) || 0;
         sheet.addRow([c.containerNumber, c.status, count]);
       }
     } else {
@@ -502,23 +702,7 @@ export class ReportsService {
         'CBM',
         'Quantity',
       ]);
-      const containerIds = containers.map((c) => c._id);
-      const shipFilter: any = {
-        containerId: { $in: containerIds },
-        ...orgFilter,
-      };
-      if (dto.customerId) {
-        const target = new Types.ObjectId(dto.customerId);
-        shipFilter.$or = [
-          { customerId: target },
-          { partnerCustomerId: target },
-        ];
-      }
-      const shipments = await this.shipmentModel
-        .find(shipFilter)
-        .populate('customerId', 'name phone')
-        .populate('partnerId', 'name phoneNumber')
-        .exec();
+      const shipments = data.shipments || [];
       const shipsByContainer = new Map<string, ShipmentDocument[]>();
       shipments.forEach((s) => {
         const key = s.containerId?.toString() || 'unknown';
