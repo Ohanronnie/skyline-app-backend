@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { SmsSendEvent } from './sms.events';
 import { SmsTemplatesService } from '../sms-templates/sms-templates.service';
 import { Organization } from '../user/users.schema';
-import { channel } from 'process';
+import axios from 'axios';
 
 @Injectable()
 export class SmsListener {
@@ -12,32 +12,7 @@ export class SmsListener {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => SmsTemplatesService))
     private readonly smsTemplatesService: SmsTemplatesService,
-  ) {
-    const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
-    const authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
-    const twilioPhoneNumber = '+14783129261';
-  console.log(accountSid, authToken, twilioPhoneNumber);
-    if (accountSid && authToken && twilioPhoneNumber) {
-      console.log('--- Initializing Twilio Test Send ---');
-      try {
-        const client = require('twilio')(accountSid, authToken);
-        const uniqueText = `Skyline Test Code: ${Math.floor(1000 + Math.random() * 9000)} at ${new Date().toLocaleTimeString()}`;
-        return;
-        client.messages.create({
-          body: uniqueText,
-          from: twilioPhoneNumber,
-          to: '+2349125549301',
-          channel: 'sms',
-        })
-        .then(msg => console.log(`SUCCESSS: Test SMS sent to +2349125549301. SID: ${msg.sid}`))
-        .catch(err => console.error(`Twilio Error in constructor: ${err.message}`));
-      } catch (e) {
-        console.error('Failed to initialize Twilio client in constructor', e);
-      }
-    } else {
-      console.warn('Missing Twilio credentials or source phone number');
-    }
-  }
+  ) {}
 
   @OnEvent('sms.send')
   async handleSmsSendEvent(event: SmsSendEvent) {
@@ -81,25 +56,32 @@ export class SmsListener {
     }
 
     try {
-      const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
-      const authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
-      const twilioPhoneNumber = this.configService.get<string>(
-        'TWILIO_PHONE_NUMBER',
-      );
-      console.log(accountSid, authToken, twilioPhoneNumber);
-      if (accountSid && authToken && twilioPhoneNumber) {
-        const client = require('twilio')(accountSid, authToken);
-        await client.messages.create({
-          body: finalMessage,
-         // from: twilioPhoneNumber,
-          to: phoneNumber,
+      const arkeselApiKey = this.configService.get<string>('ARKESEL_API_KEY');
+      
+      if (arkeselApiKey) {
+        const response = await axios.get('https://sms.arkesel.com/sms/api', {
+          params: {
+            action: 'send-sms',
+            api_key: arkeselApiKey,
+            to: phoneNumber,
+            from: 'Skyline',
+            sms: finalMessage,
+          },
         });
-        console.log(`SMS sent to ${phoneNumber}`);
+
+        if (response.data.code === 'ok') {
+          console.log(`SMS successfully sent to ${phoneNumber} via Arkesel`);
+        } else {
+          console.warn(`Arkesel SMS response error: ${JSON.stringify(response.data)}`);
+        }
       } else {
-        console.warn('Twilio credentials not found, skipping SMS send');
+        console.warn('ARKESEL_API_KEY not found, skipping SMS send');
       }
-    } catch (error) {
-      console.error('Failed to send SMS via Twilio:', error);
+    } catch (error: any) {
+      console.error(
+        'Failed to send SMS via Arkesel:',
+        error.response?.data || error.message,
+      );
     }
   }
 }

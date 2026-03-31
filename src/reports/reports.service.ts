@@ -280,15 +280,20 @@ export class ReportsService {
         for (const key of relatedCustomers) {
           // Find the customer object for name
           let name = 'Unknown';
+          // Find the customer object for name. Handle both populated objects and raw IDs.
           const c: any =
             [
               s.customerId,
               s.partnerCustomerId,
               ...(s.customerIds || []),
               ...(s.partnerAssignments || []).map((a: any) => a.customerId),
-            ].find((cust: any) => cust?._id?.toString() === key) || key;
+            ].find((cust: any) => {
+              if (!cust) return false;
+              const custId = (cust._id || cust).toString();
+              return custId === key;
+            }) || key;
 
-          name = (c as any).name || 'Unknown';
+          name = (c as any).name || `Unknown (${key})`;
 
           const entry = byCustomer.get(key) || {
             name,
