@@ -135,67 +135,130 @@ export class ReportsService {
     return { from, to };
   }
 
-  private buildShipmentFilter(
+  private stringifiedArrayExpression(path: string, field?: string) {
+    return {
+      $map: {
+        input: { $ifNull: [`$${path}`, []] },
+        as: 'item',
+        in: field
+          ? { $toString: `$$item.${field}` }
+          : { $toString: '$$item' },
+      },
+    };
+  }
+
+  private createReferenceMatchStage(
+    ids: string[],
+    options: {
+      scalar?: string[];
+      array?: string[];
+      nestedArray?: Array<{ path: string; field: string }>;
+    },
+  ) {
+    const conditions: any[] = [];
+
+    for (const path of options.scalar || []) {
+      conditions.push({
+        $in: [{ $toString: `$${path}` }, ids],
+      });
+    }
+
+    for (const path of options.array || []) {
+      conditions.push({
+        $gt: [
+          {
+            $size: {
+              $setIntersection: [this.stringifiedArrayExpression(path), ids],
+            },
+          },
+          0,
+        ],
+      });
+    }
+
+    for (const item of options.nestedArray || []) {
+      conditions.push({
+        $gt: [
+          {
+            $size: {
+              $setIntersection: [
+                this.stringifiedArrayExpression(item.path, item.field),
+                ids,
+              ],
+            },
+          },
+          0,
+        ],
+      });
+    }
+
+    return {
+      $match: {
+        $expr: {
+          $or: conditions,
+        },
+      },
+    };
+  }
+
+  private buildShipmentPipeline(
     dto: GenerateExcelReportDto,
     organization?: Organization,
   ) {
     const dateQuery = this.buildDateQuery(dto, 'createdAt');
     const query: any = { ...dateQuery };
+    const pipeline: any[] = [];
 
     if (organization) {
       Object.assign(query, buildOrganizationFilter(organization));
-    }
-
-    const filters: any[] = [];
-
-    if (dto.partnerId) {
-      const targetPartnerId = new Types.ObjectId(dto.partnerId);
-      filters.push({
-        $or: [
-          { partnerId: targetPartnerId },
-          { partnerIds: targetPartnerId },
-          { 'partnerAssignments.partnerId': targetPartnerId },
-        ],
-      });
-    }
-
-    if (dto.customerId) {
-      const targetCustomerId = new Types.ObjectId(dto.customerId);
-      filters.push({
-        $or: [
-          { customerId: targetCustomerId },
-          { customerIds: targetCustomerId },
-          { partnerCustomerId: targetCustomerId },
-          { 'partnerAssignments.customerId': targetCustomerId },
-        ],
-      });
-    }
-
-    if (filters.length === 1) {
-      query.$or = filters[0].$or;
-    } else if (filters.length > 1) {
-      query.$and = filters;
-    }
-
-    if (dto.containerId) {
-      query.containerId = new Types.ObjectId(dto.containerId);
     }
 
     if (dto.shipmentStatuses?.length) {
       query.status = { $in: dto.shipmentStatuses };
     }
 
-    const payload = (dto as any).payload;
-    if (payload?.selectedShipments?.length) {
-      query._id = {
-        $in: payload.selectedShipments.map(
-          (id: string) => new Types.ObjectId(id),
-        ),
-      };
+    if (Object.keys(query).length > 0) {
+      pipeline.push({ $match: query });
     }
 
-    this.logger.log(`[buildShipmentFilter] Final query: ${JSON.stringify(query)}`);
-    return query;
+    if (dto.partnerId) {
+      pipeline.push(
+        this.createReferenceMatchStage([dto.partnerId], {
+          scalar: ['partnerId'],
+          array: ['partnerIds'],
+          nestedArray: [{ path: 'partnerAssignments', field: 'partnerId' }],
+        }),
+      );
+    }
+
+    if (dto.customerId) {
+      pipeline.push(
+        this.createReferenceMatchStage([dto.customerId], {
+          scalar: ['customerId', 'partnerCustomerId'],
+          array: ['customerIds'],
+          nestedArray: [{ path: 'partnerAssignments', field: 'customerId' }],
+        }),
+      );
+    }
+
+    if (dto.containerId) {
+      pipeline.push(
+        this.createReferenceMatchStage([dto.containerId], {
+          scalar: ['containerId'],
+        }),
+      );
+    }
+
+    const payload = (dto as any).payload;
+    if (payload?.selectedShipments?.length) {
+      pipeline.push(
+        this.createReferenceMatchStage(payload.selectedShipments, {
+          scalar: ['_id'],
+        }),
+      );
+    }
+
+    return pipeline;
   }
 
   private buildDateQuery(
@@ -215,20 +278,46 @@ export class ReportsService {
     dto: GenerateExcelReportDto,
     organization?: Organization,
   ) {
-    const query = this.buildShipmentFilter(dto, organization);
-    return this.shipmentModel
-      .find(query)
-      .populate('customerId', 'name phone email location')
-      .populate('customerIds', 'name phone email location')
-      .populate('partnerId', 'name phoneNumber')
-      .populate('partnerCustomerId', 'name phone email location')
-      .populate({
+    const shipments = await this.shipmentModel
+      .aggregate([...this.buildShipmentPipeline(dto, organization), { $sort: { createdAt: -1 } }])
+      .exec();
+
+    return this.shipmentModel.populate(shipments, [
+      { path: 'customerId', select: 'name phone email location' },
+      { path: 'customerIds', select: 'name phone email location' },
+      { path: 'partnerId', select: 'name phoneNumber' },
+      { path: 'partnerCustomerId', select: 'name phone email location' },
+      {
         path: 'partnerAssignments.customerId',
         select: 'name phone email location',
-      })
-      .populate('containerId', 'containerNumber')
-      .sort({ createdAt: -1 })
+      },
+      { path: 'containerId', select: 'containerNumber' },
+    ]);
+  }
+
+  private async getShipmentsForCustomerIds(
+    customerIds: string[],
+    dto: GenerateExcelReportDto,
+    organization?: Organization,
+  ) {
+    const shipments = await this.shipmentModel
+      .aggregate([
+        ...this.buildShipmentPipeline(
+          { ...dto, customerId: undefined, containerId: undefined },
+          organization,
+        ),
+        this.createReferenceMatchStage(customerIds, {
+          scalar: ['customerId', 'partnerCustomerId'],
+          array: ['customerIds'],
+          nestedArray: [{ path: 'partnerAssignments', field: 'customerId' }],
+        }),
+        { $sort: { createdAt: -1 } },
+      ])
       .exec();
+
+    return this.shipmentModel.populate(shipments, [
+      { path: 'containerId', select: 'containerNumber' },
+    ]);
   }
 
   private async generateShipmentsExcel(
@@ -389,56 +478,19 @@ export class ReportsService {
 
     if (dto.mode === ReportMode.SUMMARY && dto.customerId && customers.length === 1) {
       const targetCustomer = customers[0];
-      const shipments = await this.shipmentModel
-        .find({
-          ...orgFilter,
-          $or: [
-            { customerId: targetCustomer._id },
-            { customerIds: targetCustomer._id },
-            { partnerCustomerId: targetCustomer._id },
-            { 'partnerAssignments.customerId': targetCustomer._id },
-          ],
-        })
-        .exec();
+      const shipments = await this.shipmentModel.aggregate([
+        ...this.buildShipmentPipeline(dto, organization),
+        { $sort: { createdAt: -1 } },
+      ]).exec();
       return { customer: targetCustomer, shipments };
     }
 
     if (dto.mode === ReportMode.DETAILED) {
-      const customerIds = customers.map((c) => c._id);
-      const filters: any[] = [
-        {
-          $or: [
-            { customerId: { $in: customerIds } },
-            { customerIds: { $in: customerIds } },
-            { partnerCustomerId: { $in: customerIds } },
-            { 'partnerAssignments.customerId': { $in: customerIds } },
-          ],
-        },
-      ];
-
-      if (dto.partnerId) {
-        const targetPartnerId = new Types.ObjectId(dto.partnerId);
-        filters.push({
-          $or: [
-            { partnerId: targetPartnerId },
-            { partnerIds: targetPartnerId },
-            { 'partnerAssignments.partnerId': targetPartnerId },
-          ],
-        });
-      }
-
-      const shipmentQuery: any = { ...orgFilter };
-      if (filters.length === 1) {
-        shipmentQuery.$or = filters[0].$or;
-      } else {
-        shipmentQuery.$and = filters;
-      }
-
-      const shipments = await this.shipmentModel
-        .find(shipmentQuery)
-        .populate('containerId', 'containerNumber')
-        .sort({ createdAt: -1 })
-        .exec();
+      const shipments = await this.getShipmentsForCustomerIds(
+        customers.map((c) => c._id.toString()),
+        dto,
+        organization,
+      );
 
       return { customers, shipments };
     }
@@ -636,37 +688,37 @@ export class ReportsService {
       .sort({ createdAt: -1 })
       .exec();
 
-    const shipmentFilter: any = {
-      containerId: { $in: containers.map((c) => c._id) },
-      ...orgFilter,
-    };
-
-    if (dto.customerId) {
-      const target = new Types.ObjectId(dto.customerId);
-      shipmentFilter.$or = [
-        { customerId: target },
-        { customerIds: target },
-        { partnerCustomerId: target },
-        { 'partnerAssignments.customerId': target },
-      ];
-    }
+    const containerIds = containers.map((c) => c._id.toString());
+    const shipmentPipeline = [
+      ...this.buildShipmentPipeline(
+        { ...dto, containerId: undefined },
+        organization,
+      ),
+      this.createReferenceMatchStage(containerIds, {
+        scalar: ['containerId'],
+      }),
+    ];
 
     if (dto.mode === ReportMode.SUMMARY) {
       const shipmentCounts = await this.shipmentModel
         .aggregate([
-          { $match: shipmentFilter },
-          { $group: { _id: '$containerId', count: { $sum: 1 } } },
+          ...shipmentPipeline,
+          { $addFields: { normalizedContainerId: { $toString: '$containerId' } } },
+          { $group: { _id: '$normalizedContainerId', count: { $sum: 1 } } },
         ])
         .exec();
       return { containers, shipmentCounts };
     }
 
     const shipments = await this.shipmentModel
-      .find(shipmentFilter)
-      .populate('customerId', 'name phone')
-      .populate('partnerId', 'name phoneNumber')
+      .aggregate([...shipmentPipeline, { $sort: { createdAt: -1 } }])
       .exec();
-    return { containers, shipments };
+    const populatedShipments = await this.shipmentModel.populate(shipments, [
+      { path: 'customerId', select: 'name phone' },
+      { path: 'partnerId', select: 'name phoneNumber' },
+      { path: 'partnerCustomerId', select: 'name phone' },
+    ]);
+    return { containers, shipments: populatedShipments };
   }
 
   private async generateContainersExcel(

@@ -56,7 +56,6 @@ export class ReportsController {
         ...statusArray,
       ] as any;
     }
-    console.log(dto);
 
     // If debug is true, return JSON instead of Excel
     if (debug === 'true') {
