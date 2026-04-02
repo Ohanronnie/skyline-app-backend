@@ -25,6 +25,12 @@ import ExcelJS from 'exceljs';
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
+  private readonly matchSourcePriority = new Map<string, number>([
+    ['Primary', 4],
+    ['Partner-Specific', 3],
+    ['Partner Assignment', 2],
+    ['Array (Multiple)', 1],
+  ]);
 
   constructor(
     @InjectModel(Shipment.name)
@@ -135,6 +141,225 @@ export class ReportsService {
     return { from, to };
   }
 
+  private getReferenceId(value: any): string | undefined {
+    if (!value) return undefined;
+    const rawId = value._id ?? value.id ?? value;
+    if (!rawId) return undefined;
+    return typeof rawId === 'string' ? rawId : rawId.toString();
+  }
+
+  private formatLabel(value?: string | null): string {
+    if (!value) return 'All';
+    return value
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  private formatDate(value?: Date | string | null): string {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    }).format(date);
+  }
+
+  private formatDateTime(value?: Date | string | null): string {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  }
+
+  private buildFilterSummary(dto: GenerateExcelReportDto): string {
+    const filters: string[] = [];
+
+    if (dto.fromDate || dto.toDate) {
+      filters.push(
+        `Date: ${dto.fromDate ? this.formatDate(dto.fromDate) : 'Start'} - ${dto.toDate ? this.formatDate(dto.toDate) : 'Now'}`,
+      );
+    }
+    if (dto.shipmentStatuses?.length) {
+      filters.push(
+        `Shipment Status: ${dto.shipmentStatuses.map((status) => this.formatLabel(status)).join(', ')}`,
+      );
+    }
+    if (dto.customerTypes?.length) {
+      filters.push(
+        `Customer Type: ${dto.customerTypes.map((type) => this.formatLabel(type)).join(', ')}`,
+      );
+    }
+    if (dto.locations?.length) {
+      filters.push(
+        `Location: ${dto.locations.map((location) => this.formatLabel(location)).join(', ')}`,
+      );
+    }
+    if (dto.partnerId) filters.push(`Partner ID: ${dto.partnerId}`);
+    if (dto.customerId) filters.push(`Customer ID: ${dto.customerId}`);
+    if (dto.containerId) filters.push(`Container ID: ${dto.containerId}`);
+    if (dto.onlyWithShipments) filters.push('Only Customers With Shipments');
+
+    return filters.length ? filters.join(' | ') : 'No filters applied';
+  }
+
+  private addReportHeader(
+    sheet: ExcelJS.Worksheet,
+    title: string,
+    dto: GenerateExcelReportDto,
+    organization: Organization | undefined,
+    columnCount: number,
+  ) {
+    sheet.addRow([title]);
+    if (columnCount > 1) {
+      sheet.mergeCells(1, 1, 1, columnCount);
+    }
+
+    sheet.addRow(['Generated At', this.formatDateTime(new Date())]);
+    sheet.addRow(['Mode', this.formatLabel(dto.mode)]);
+    sheet.addRow(['Organization', organization ? this.formatLabel(organization) : 'All']);
+    sheet.addRow(['Filters', this.buildFilterSummary(dto)]);
+    sheet.addRow([]);
+
+    const titleRow = sheet.getRow(1);
+    titleRow.font = { bold: true, size: 16, color: { argb: 'FF1F2937' } };
+    titleRow.alignment = { horizontal: 'left' };
+    titleRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE5EEF7' },
+    };
+
+    for (let rowNumber = 2; rowNumber <= 5; rowNumber += 1) {
+      const row = sheet.getRow(rowNumber);
+      row.getCell(1).font = { bold: true, color: { argb: 'FF374151' } };
+      row.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF8FAFC' },
+      };
+    }
+  }
+
+  private styleSectionRow(sheet: ExcelJS.Worksheet, rowNumber: number) {
+    const row = sheet.getRow(rowNumber);
+    row.font = { bold: true, color: { argb: 'FF0F172A' } };
+    row.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE2E8F0' },
+    };
+  }
+
+  private styleTableHeaderRow(sheet: ExcelJS.Worksheet, rowNumber: number) {
+    const row = sheet.getRow(rowNumber);
+    row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    row.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1D4ED8' },
+    };
+    row.alignment = { vertical: 'middle', horizontal: 'left' };
+  }
+
+  private finalizeSheet(
+    sheet: ExcelJS.Worksheet,
+    options: {
+      freezeAtRow?: number;
+      zebraFromRow?: number;
+      numberColumns?: number[];
+    } = {},
+  ) {
+    const lastColumn = sheet.columnCount || 1;
+
+    sheet.views = [
+      {
+        state: 'frozen',
+        ySplit: options.freezeAtRow ?? 0,
+      },
+    ];
+
+    for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+      const row = sheet.getRow(rowNumber);
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        };
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: 'left',
+          wrapText: true,
+        };
+      });
+
+      if (
+        options.zebraFromRow &&
+        rowNumber >= options.zebraFromRow &&
+        (rowNumber - options.zebraFromRow) % 2 === 1
+      ) {
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF8FAFC' },
+          };
+        });
+      }
+    }
+
+    for (const columnIndex of options.numberColumns || []) {
+      sheet.getColumn(columnIndex).numFmt = '#,##0.000';
+    }
+
+    for (let columnIndex = 1; columnIndex <= lastColumn; columnIndex += 1) {
+      const column = sheet.getColumn(columnIndex);
+      let maxLength = 12;
+
+      column.eachCell({ includeEmpty: true }, (cell) => {
+        const rawValue = cell.value;
+        let cellText = '';
+        if (rawValue === null || rawValue === undefined) {
+          cellText = '';
+        } else if (typeof rawValue === 'object' && 'richText' in (rawValue as any)) {
+          cellText = (rawValue as any).richText.map((part: any) => part.text).join('');
+        } else {
+          cellText = String(rawValue);
+        }
+        maxLength = Math.max(maxLength, Math.min(cellText.length + 2, 36));
+      });
+
+      column.width = maxLength;
+    }
+  }
+
+  private setCustomerMatchSource(
+    matches: Map<string, string>,
+    customerId: string | undefined,
+    source: string,
+  ) {
+    if (!customerId) return;
+    const existing = matches.get(customerId);
+    const nextPriority = this.matchSourcePriority.get(source) ?? 0;
+    const existingPriority = existing
+      ? this.matchSourcePriority.get(existing) ?? 0
+      : 0;
+
+    if (!existing || nextPriority > existingPriority) {
+      matches.set(customerId, source);
+    }
+  }
+
   private stringifiedArrayExpression(path: string, field?: string) {
     return {
       $map: {
@@ -155,6 +380,10 @@ export class ReportsService {
       nestedArray?: Array<{ path: string; field: string }>;
     },
   ) {
+    if (!ids.length) {
+      return { $match: { _id: { $exists: false } } };
+    }
+
     const conditions: any[] = [];
 
     for (const path of options.scalar || []) {
@@ -190,6 +419,10 @@ export class ReportsService {
           0,
         ],
       });
+    }
+
+    if (!conditions.length) {
+      return { $match: { _id: { $exists: false } } };
     }
 
     return {
@@ -330,39 +563,53 @@ export class ReportsService {
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Shipments');
+    const detailedColumns = 15;
+    const summaryColumns = 3;
+
+    this.addReportHeader(
+      sheet,
+      'Shipment Report',
+      dto,
+      organization,
+      dto.mode === ReportMode.DETAILED ? detailedColumns : summaryColumns,
+    );
 
     if (dto.mode === ReportMode.SUMMARY) {
       const totalShipments = shipments.length;
       const totalCbm = shipments.reduce((sum, s) => sum + (s.cbm || 0), 0);
-      const totalQuantity = shipments.reduce(
-        (sum, s) => sum + (s.quantity || 0),
-        0,
-      );
 
       sheet.addRow(['Summary']);
+      this.styleSectionRow(sheet, sheet.rowCount);
       sheet.addRow(['Total Shipments', totalShipments]);
       sheet.addRow(['Total CBM', totalCbm.toFixed(3)]);
-      sheet.addRow(['Total Quantity', totalQuantity]);
       sheet.addRow([]);
 
       sheet.addRow(['Per Customer']);
-      sheet.addRow(['Customer Name', 'Shipments', 'Total CBM', 'Total Qty']);
+      this.styleSectionRow(sheet, sheet.rowCount);
+      sheet.addRow(['Customer Name', 'Shipments', 'Total CBM']);
+      const customerHeaderRow = sheet.rowCount;
+      this.styleTableHeaderRow(sheet, customerHeaderRow);
       const byCustomer = new Map<
         string,
-        { name: string; count: number; cbm: number; qty: number }
+        { name: string; count: number; cbm: number }
       >();
       for (const s of shipments) {
         // Collect all related customer IDs and names for summary
         const relatedCustomers = new Set<string>();
-        if (s.customerId) relatedCustomers.add(s.customerId.toString());
-        if (s.partnerCustomerId)
-          relatedCustomers.add(s.partnerCustomerId.toString());
+        const primaryCustomerId = this.getReferenceId(s.customerId);
+        if (primaryCustomerId) relatedCustomers.add(primaryCustomerId);
+        const partnerCustomerId = this.getReferenceId(s.partnerCustomerId);
+        if (partnerCustomerId) relatedCustomers.add(partnerCustomerId);
         if (s.customerIds)
-          s.customerIds.forEach((id: any) => relatedCustomers.add(id.toString()));
+          s.customerIds.forEach((id: any) => {
+            const customerId = this.getReferenceId(id);
+            if (customerId) relatedCustomers.add(customerId);
+          });
         if (s.partnerAssignments)
-          s.partnerAssignments.forEach((a: any) =>
-            relatedCustomers.add(a.customerId.toString()),
-          );
+          s.partnerAssignments.forEach((a: any) => {
+            const customerId = this.getReferenceId(a.customerId);
+            if (customerId) relatedCustomers.add(customerId);
+          });
 
         if (relatedCustomers.size === 0) continue;
 
@@ -378,7 +625,7 @@ export class ReportsService {
               ...(s.partnerAssignments || []).map((a: any) => a.customerId),
             ].find((cust: any) => {
               if (!cust) return false;
-              const custId = (cust._id || cust).toString();
+              const custId = this.getReferenceId(cust);
               return custId === key;
             }) || key;
 
@@ -388,28 +635,31 @@ export class ReportsService {
             name,
             count: 0,
             cbm: 0,
-            qty: 0,
           };
           entry.count += 1;
           entry.cbm += s.cbm || 0;
-          entry.qty += s.quantity || 0;
           byCustomer.set(key, entry);
         }
       }
-      for (const entry of byCustomer.values()) {
-        sheet.addRow([
-          entry.name,
-          entry.count,
-          entry.cbm.toFixed(3),
-          entry.qty,
-        ]);
+      const rankedCustomers = [...byCustomer.values()].sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+        return right.cbm - left.cbm;
+      });
+      for (const entry of rankedCustomers) {
+        sheet.addRow([entry.name, entry.count, entry.cbm.toFixed(3)]);
       }
+
+      this.finalizeSheet(sheet, {
+        zebraFromRow: customerHeaderRow + 1,
+        numberColumns: [3],
+      });
     } else {
       sheet.addRow([
         'Tracking Number',
         'Status',
         'CBM',
-        'Quantity',
         'Customer Name',
         'Customer Phone',
         'Customer Email',
@@ -423,6 +673,8 @@ export class ReportsService {
         'Created At',
         'Delivered At',
       ]);
+      const headerRowNumber = sheet.rowCount;
+      this.styleTableHeaderRow(sheet, headerRowNumber);
       for (const s of shipments) {
         const c: any = s.customerId;
         const p: any = s.partnerId;
@@ -432,7 +684,6 @@ export class ReportsService {
           s.trackingNumber,
           s.status,
           s.cbm ?? '',
-          s.quantity ?? '',
           c?.name ?? '',
           c?.phone ?? '',
           c?.email ?? '',
@@ -443,10 +694,16 @@ export class ReportsService {
           pc?.phone ?? '',
           cont?.containerNumber ?? '',
           s.description ?? '',
-          (s as any).createdAt ? (s as any).createdAt.toISOString() : '',
-          s.deliveredAt ? s.deliveredAt.toISOString() : '',
+          this.formatDateTime((s as any).createdAt),
+          this.formatDateTime(s.deliveredAt),
         ]);
       }
+
+      this.finalizeSheet(sheet, {
+        freezeAtRow: headerRowNumber,
+        zebraFromRow: headerRowNumber + 1,
+        numberColumns: [3],
+      });
     }
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
@@ -505,10 +762,19 @@ export class ReportsService {
     this.logger.log(`[generateCustomersExcel] DTO: ${JSON.stringify(dto)}`);
     const data = await this.getCustomersData(dto, organization);
     const customers = data.customers || [data.customer];
-    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Customers');
+    const detailedColumns = 14;
+    const summaryColumns = dto.customerId && customers.length === 1 ? 2 : 2;
+
+    this.addReportHeader(
+      sheet,
+      'Customer Report',
+      dto,
+      organization,
+      dto.mode === ReportMode.DETAILED ? detailedColumns : summaryColumns,
+    );
 
     if (dto.mode === ReportMode.SUMMARY) {
       if (dto.customerId && customers.length === 1) {
@@ -516,9 +782,10 @@ export class ReportsService {
         const shipments = data.shipments || [];
 
         sheet.addRow(['CUSTOMER DASHBOARD']);
+        this.styleSectionRow(sheet, sheet.rowCount);
         sheet.addRow(['Name', targetCustomer?.name]);
-        sheet.addRow(['Type', targetCustomer?.type]);
-        sheet.addRow(['Location', targetCustomer?.location]);
+        sheet.addRow(['Type', this.formatLabel(targetCustomer?.type)]);
+        sheet.addRow(['Location', this.formatLabel(targetCustomer?.location)]);
         sheet.addRow(['Email', targetCustomer?.email || 'N/A']);
         sheet.addRow(['Phone', targetCustomer?.phone || 'N/A']);
         sheet.addRow([]);
@@ -527,15 +794,11 @@ export class ReportsService {
           (s: number, ship: any) => s + (ship.cbm || 0),
           0,
         );
-        const totalQty = shipments.reduce(
-          (s: number, ship: any) => s + (ship.quantity || 0),
-          0,
-        );
 
         sheet.addRow(['KEY METRICS']);
+        this.styleSectionRow(sheet, sheet.rowCount);
         sheet.addRow(['Total Shipments', shipments.length]);
         sheet.addRow(['Total Volume (CBM)', totalCbm.toFixed(3)]);
-        sheet.addRow(['Total Quantity (Items)', totalQty]);
         sheet.addRow([
           'Average CBM per Shipment',
           shipments.length ? (totalCbm / shipments.length).toFixed(3) : 0,
@@ -543,12 +806,13 @@ export class ReportsService {
         sheet.addRow([]);
 
         sheet.addRow(['SHIPMENT STATUS BREAKDOWN']);
+        this.styleSectionRow(sheet, sheet.rowCount);
         const statusCounts = new Map<string, number>();
         shipments.forEach((s: any) =>
           statusCounts.set(s.status, (statusCounts.get(s.status) || 0) + 1),
         );
         for (const [status, count] of statusCounts.entries()) {
-          sheet.addRow([status.toUpperCase().replace(/_/g, ' '), count]);
+          sheet.addRow([this.formatLabel(status), count]);
         }
 
         if (shipments.length > 0) {
@@ -558,25 +822,59 @@ export class ReportsService {
             .sort();
           sheet.addRow([]);
           sheet.addRow(['ACTIVITY DATES']);
+          this.styleSectionRow(sheet, sheet.rowCount);
           sheet.addRow([
             'First Shipment',
-            dates[0].toISOString().split('T')[0],
+            this.formatDate(dates[0]),
           ]);
           sheet.addRow([
             'Latest Shipment',
-            dates[dates.length - 1].toISOString().split('T')[0],
+            this.formatDate(dates[dates.length - 1]),
           ]);
         }
+
+        this.finalizeSheet(sheet, {
+          numberColumns: [2],
+        });
       } else {
         sheet.addRow(['Summary']);
+        this.styleSectionRow(sheet, sheet.rowCount);
         sheet.addRow(['Total Customers', customers.length]);
         sheet.addRow([]);
         sheet.addRow(['By Type']);
+        this.styleSectionRow(sheet, sheet.rowCount);
+        sheet.addRow(['Customer Type', 'Count']);
+        const typeHeaderRow = sheet.rowCount;
+        this.styleTableHeaderRow(sheet, typeHeaderRow);
         const byType = new Map<string, number>();
         customers.forEach((c) =>
           byType.set(c.type, (byType.get(c.type) || 0) + 1),
         );
-        byType.forEach((count, type) => sheet.addRow([type, count]));
+        [...byType.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .forEach(([type, count]) =>
+            sheet.addRow([this.formatLabel(type), count]),
+          );
+
+        sheet.addRow([]);
+        sheet.addRow(['By Location']);
+        this.styleSectionRow(sheet, sheet.rowCount);
+        sheet.addRow(['Location', 'Count']);
+        const locationHeaderRow = sheet.rowCount;
+        this.styleTableHeaderRow(sheet, locationHeaderRow);
+        const byLocation = new Map<string, number>();
+        customers.forEach((c) =>
+          byLocation.set(c.location, (byLocation.get(c.location) || 0) + 1),
+        );
+        [...byLocation.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .forEach(([location, count]) =>
+            sheet.addRow([this.formatLabel(location), count]),
+          );
+
+        this.finalizeSheet(sheet, {
+          zebraFromRow: typeHeaderRow + 1,
+        });
       }
     } else {
       sheet.addRow([
@@ -590,12 +888,13 @@ export class ReportsService {
         'Partner Phone',
         'Shipment Tracking',
         'Shipment Status',
-        'Match Source',
+        'Customer Link Type',
         'Container Number',
         'CBM',
-        'Quantity',
         'Total Shipments (Lifetime)',
       ]);
+      const headerRowNumber = sheet.rowCount;
+      this.styleTableHeaderRow(sheet, headerRowNumber);
       const shipments = data.shipments || [];
 
       const shipmentsByCustomer = new Map<
@@ -604,17 +903,32 @@ export class ReportsService {
       >();
       shipments.forEach((s: any) => {
         const idToSource = new Map<string, string>();
-        if (s.customerId) idToSource.set(s.customerId.toString(), 'Primary');
-        if (s.partnerCustomerId)
-          idToSource.set(s.partnerCustomerId.toString(), 'Partner-Specific');
+        const primaryCustomerId = this.getReferenceId(s.customerId);
+        this.setCustomerMatchSource(idToSource, primaryCustomerId, 'Primary');
+        const partnerCustomerId = this.getReferenceId(s.partnerCustomerId);
+        this.setCustomerMatchSource(
+          idToSource,
+          partnerCustomerId,
+          'Partner-Specific',
+        );
         if (s.customerIds)
-          s.customerIds.forEach((id: any) =>
-            idToSource.set(id.toString(), 'Array (Multiple)'),
-          );
+          s.customerIds.forEach((id: any) => {
+            const customerId = this.getReferenceId(id);
+            this.setCustomerMatchSource(
+              idToSource,
+              customerId,
+              'Array (Multiple)',
+            );
+          });
         if (s.partnerAssignments)
-          s.partnerAssignments.forEach((a: any) =>
-            idToSource.set(a.customerId.toString(), 'Partner Assignment'),
-          );
+          s.partnerAssignments.forEach((a: any) => {
+            const customerId = this.getReferenceId(a.customerId);
+            this.setCustomerMatchSource(
+              idToSource,
+              customerId,
+              'Partner Assignment',
+            );
+          });
 
         idToSource.forEach((source, id) => {
           const entries = shipmentsByCustomer.get(id) || [];
@@ -631,8 +945,8 @@ export class ReportsService {
         if (cShips.length === 0) {
           sheet.addRow([
             c.name,
-            c.type,
-            c.location,
+            this.formatLabel(c.type),
+            this.formatLabel(c.location),
             c.email || '',
             c.phone || '',
             c.address || '',
@@ -644,7 +958,6 @@ export class ReportsService {
             'N/A',
             0,
             0,
-            0,
           ]);
         } else {
           for (const entry of cShips) {
@@ -652,8 +965,8 @@ export class ReportsService {
             const cont: any = s.containerId;
             sheet.addRow([
               c.name,
-              c.type,
-              c.location,
+              this.formatLabel(c.type),
+              this.formatLabel(c.location),
               c.email || '',
               c.phone || '',
               c.address || '',
@@ -664,12 +977,17 @@ export class ReportsService {
               entry.source,
               cont?.containerNumber || 'Not Loaded',
               s.cbm || 0,
-              s.quantity || 0,
               cShips.length,
             ]);
           }
         }
       }
+
+      this.finalizeSheet(sheet, {
+        freezeAtRow: headerRowNumber,
+        zebraFromRow: headerRowNumber + 1,
+        numberColumns: [13],
+      });
     }
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
@@ -727,13 +1045,24 @@ export class ReportsService {
   ): Promise<Uint8Array> {
     const data = await this.getContainersData(dto, organization);
     const containers = data.containers;
-    const orgFilter = organization ? buildOrganizationFilter(organization) : {};
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Containers');
+    const detailedColumns = 9;
+    const summaryColumns = 3;
+
+    this.addReportHeader(
+      sheet,
+      'Container Report',
+      dto,
+      organization,
+      dto.mode === ReportMode.DETAILED ? detailedColumns : summaryColumns,
+    );
 
     if (dto.mode === ReportMode.SUMMARY) {
       sheet.addRow(['Container Number', 'Status', 'Total Shipments']);
+      const headerRowNumber = sheet.rowCount;
+      this.styleTableHeaderRow(sheet, headerRowNumber);
       const counts = data.shipmentCounts || [];
       const countMap = new Map(
         counts.map((item: any) => [
@@ -744,8 +1073,13 @@ export class ReportsService {
 
       for (const c of containers) {
         const count = countMap.get(c._id.toString()) || 0;
-        sheet.addRow([c.containerNumber, c.status, count]);
+        sheet.addRow([c.containerNumber, this.formatLabel(c.status), count]);
       }
+
+      this.finalizeSheet(sheet, {
+        freezeAtRow: headerRowNumber,
+        zebraFromRow: headerRowNumber + 1,
+      });
     } else {
       sheet.addRow([
         'Container Number',
@@ -757,12 +1091,13 @@ export class ReportsService {
         'Partner Name',
         'Partner Phone',
         'CBM',
-        'Quantity',
       ]);
+      const headerRowNumber = sheet.rowCount;
+      this.styleTableHeaderRow(sheet, headerRowNumber);
       const shipments = data.shipments || [];
       const shipsByContainer = new Map<string, ShipmentDocument[]>();
       shipments.forEach((s) => {
-        const key = s.containerId?.toString() || 'unknown';
+        const key = this.getReferenceId(s.containerId) || 'unknown';
         const arr = shipsByContainer.get(key) || [];
         arr.push(s);
         shipsByContainer.set(key, arr);
@@ -771,26 +1106,35 @@ export class ReportsService {
       for (const c of containers) {
         const list = shipsByContainer.get(c._id.toString()) || [];
         if (list.length === 0) {
-          sheet.addRow([c.containerNumber, c.status, ...Array(8).fill('')]);
+          sheet.addRow([
+            c.containerNumber,
+            this.formatLabel(c.status),
+            ...Array(7).fill(''),
+          ]);
         } else {
           for (const s of list) {
             const cust: any = s.customerId;
             const part: any = s.partnerId;
             sheet.addRow([
               c.containerNumber,
-              c.status,
+              this.formatLabel(c.status),
               s.trackingNumber,
-              s.status,
+              this.formatLabel(s.status),
               cust?.name || '',
               cust?.phone || '',
               part?.name || '',
               part?.phoneNumber || '',
               s.cbm || '',
-              s.quantity || '',
             ]);
           }
         }
       }
+
+      this.finalizeSheet(sheet, {
+        freezeAtRow: headerRowNumber,
+        zebraFromRow: headerRowNumber + 1,
+        numberColumns: [9],
+      });
     }
     return workbook.xlsx.writeBuffer() as unknown as Uint8Array;
   }
