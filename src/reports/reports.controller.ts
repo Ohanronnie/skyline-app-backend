@@ -14,6 +14,11 @@ import type { Response } from 'express';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  private buildExportFilename(dto: GenerateExcelReportDto) {
+    const dateStamp = new Date().toISOString().split('T')[0];
+    return `skyinventories-${dto.type}-${dto.mode}-${dateStamp}.xlsx`;
+  }
+
   @Get('shipments')
   async shipments(@CurrentOrganization() organization: Organization) {
     return this.reportsService.shipmentsAnalytics(organization);
@@ -70,7 +75,7 @@ export class ReportsController {
     );
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="report-${Date.now()}.xlsx"`,
+      `attachment; filename="${this.buildExportFilename(dto)}"`,
     );
     return res.send(buffer);
   }

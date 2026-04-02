@@ -223,9 +223,13 @@ export class ReportsService {
       sheet.mergeCells(1, 1, 1, columnCount);
     }
 
+    sheet.addRow(['Company', 'Skyinventories']);
     sheet.addRow(['Generated At', this.formatDateTime(new Date())]);
     sheet.addRow(['Mode', this.formatLabel(dto.mode)]);
-    sheet.addRow(['Organization', organization ? this.formatLabel(organization) : 'All']);
+    sheet.addRow([
+      'Organization',
+      organization ? this.formatLabel(organization) : 'All',
+    ]);
     sheet.addRow(['Filters', this.buildFilterSummary(dto)]);
     sheet.addRow([]);
 
@@ -238,7 +242,7 @@ export class ReportsService {
       fgColor: { argb: 'FFE5EEF7' },
     };
 
-    for (let rowNumber = 2; rowNumber <= 5; rowNumber += 1) {
+    for (let rowNumber = 2; rowNumber <= 6; rowNumber += 1) {
       const row = sheet.getRow(rowNumber);
       row.getCell(1).font = { bold: true, color: { argb: 'FF374151' } };
       row.getCell(1).fill = {
@@ -247,6 +251,21 @@ export class ReportsService {
         fgColor: { argb: 'FFF8FAFC' },
       };
     }
+  }
+
+  private addNoDataRow(
+    sheet: ExcelJS.Worksheet,
+    message: string,
+    columnCount: number,
+  ) {
+    sheet.addRow([message]);
+    const rowNumber = sheet.rowCount;
+    if (columnCount > 1) {
+      sheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
+    }
+    const row = sheet.getRow(rowNumber);
+    row.font = { italic: true, color: { argb: 'FF6B7280' } };
+    row.alignment = { horizontal: 'center' };
   }
 
   private styleSectionRow(sheet: ExcelJS.Worksheet, rowNumber: number) {
@@ -647,8 +666,12 @@ export class ReportsService {
         }
         return right.cbm - left.cbm;
       });
-      for (const entry of rankedCustomers) {
-        sheet.addRow([entry.name, entry.count, entry.cbm.toFixed(3)]);
+      if (rankedCustomers.length === 0) {
+        this.addNoDataRow(sheet, 'No shipment data available.', 3);
+      } else {
+        for (const entry of rankedCustomers) {
+          sheet.addRow([entry.name, entry.count, entry.cbm.toFixed(3)]);
+        }
       }
 
       this.finalizeSheet(sheet, {
@@ -682,12 +705,12 @@ export class ReportsService {
         const cont: any = s.containerId;
         sheet.addRow([
           s.trackingNumber,
-          s.status,
+          this.formatLabel(s.status),
           s.cbm ?? '',
           c?.name ?? '',
           c?.phone ?? '',
           c?.email ?? '',
-          c?.location ?? '',
+          this.formatLabel(c?.location),
           p?.name ?? '',
           p?.phoneNumber ?? '',
           pc?.name ?? '',
@@ -697,6 +720,28 @@ export class ReportsService {
           this.formatDateTime((s as any).createdAt),
           this.formatDateTime(s.deliveredAt),
         ]);
+      }
+      if (shipments.length === 0) {
+        this.addNoDataRow(sheet, 'No shipments found for the selected criteria.', 15);
+      } else {
+        sheet.addRow([
+          'TOTAL',
+          '',
+          shipments.reduce((sum, shipment) => sum + (shipment.cbm || 0), 0).toFixed(3),
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+        ]);
+        this.styleSectionRow(sheet, sheet.rowCount);
       }
 
       this.finalizeSheet(sheet, {
@@ -814,6 +859,9 @@ export class ReportsService {
         for (const [status, count] of statusCounts.entries()) {
           sheet.addRow([this.formatLabel(status), count]);
         }
+        if (shipments.length === 0) {
+          this.addNoDataRow(sheet, 'No shipments found for this customer.', 2);
+        }
 
         if (shipments.length > 0) {
           const dates = shipments
@@ -855,6 +903,9 @@ export class ReportsService {
           .forEach(([type, count]) =>
             sheet.addRow([this.formatLabel(type), count]),
           );
+        if (customers.length === 0) {
+          this.addNoDataRow(sheet, 'No customers found.', 2);
+        }
 
         sheet.addRow([]);
         sheet.addRow(['By Location']);
@@ -973,7 +1024,7 @@ export class ReportsService {
               p?.name || '',
               p?.phoneNumber || '',
               s.trackingNumber,
-              s.status,
+              this.formatLabel(s.status),
               entry.source,
               cont?.containerNumber || 'Not Loaded',
               s.cbm || 0,
@@ -981,6 +1032,27 @@ export class ReportsService {
             ]);
           }
         }
+      }
+      if (sheet.rowCount === headerRowNumber) {
+        this.addNoDataRow(sheet, 'No customer rows available.', 14);
+      } else {
+        sheet.addRow([
+          'TOTAL',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          shipments.reduce((sum, shipment: any) => sum + (shipment.cbm || 0), 0).toFixed(3),
+          customers.length,
+        ]);
+        this.styleSectionRow(sheet, sheet.rowCount);
       }
 
       this.finalizeSheet(sheet, {
@@ -1075,6 +1147,16 @@ export class ReportsService {
         const count = countMap.get(c._id.toString()) || 0;
         sheet.addRow([c.containerNumber, this.formatLabel(c.status), count]);
       }
+      if (containers.length === 0) {
+        this.addNoDataRow(sheet, 'No containers found.', 3);
+      } else {
+        sheet.addRow([
+          'TOTAL',
+          '',
+          counts.reduce((sum: number, item: any) => sum + (item.count || 0), 0),
+        ]);
+        this.styleSectionRow(sheet, sheet.rowCount);
+      }
 
       this.finalizeSheet(sheet, {
         freezeAtRow: headerRowNumber,
@@ -1128,6 +1210,25 @@ export class ReportsService {
             ]);
           }
         }
+      }
+      if (containers.length === 0) {
+        this.addNoDataRow(sheet, 'No containers found for the selected criteria.', 9);
+      } else {
+        sheet.addRow([
+          'TOTAL',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          (data.shipments || []).reduce(
+            (sum: number, shipment: any) => sum + (shipment.cbm || 0),
+            0,
+          ).toFixed(3),
+        ]);
+        this.styleSectionRow(sheet, sheet.rowCount);
       }
 
       this.finalizeSheet(sheet, {
